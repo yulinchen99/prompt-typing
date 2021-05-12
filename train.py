@@ -1,7 +1,7 @@
 import argparse
 from dataloader import get_loader, get_tokenizer, OpenNERDataset, Sample
 from model import MaskedModel
-from util import load_tag_list
+from util import load_tag_mapping, get_tag2inputid, ResultLog
 import torch.nn as nn
 from torch.optim import AdamW, lr_scheduler
 from sklearn.metrics import accuracy_score
@@ -10,7 +10,7 @@ import torch
 from tqdm import tqdm
 import random
 import warnings
-from memory_profiler import profile
+#from memory_profiler import profile
 
 warnings.filterwarnings('ignore')
 
@@ -25,7 +25,7 @@ def to_cuda(data):
     for item in data:
         data[item] = data[item].cuda()
 
-@profile(precision=4,stream=open('memory_profiler.log','w+'))
+# @profile(precision=4,stream=open('memory_profiler.log','w+'))
 def main():
     # param
     parser = argparse.ArgumentParser()
@@ -35,10 +35,10 @@ def main():
     parser.add_argument('--sample_num', type=int, default=1)
     parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--val_batch_size', type=int, default=32)
-    parser.add_argument('--tag_list_file', type=str, default='tag_list.txt')
-    parser.add_argument('--train_file', type=str, default='../model/data/data/mydata/train-inter-new.txt')
-    parser.add_argument('--val_file', type=str, default='../model/data/data/mydata/val-inter-new.txt')
-    parser.add_argument('--test_file', type=str, default='../model/data/data/mydata/test-inter-new.txt')
+    parser.add_argument('--tag_list_file', type=str, default='tag_list_coarse.txt')
+    parser.add_argument('--train_file', type=str, default='../new-NER-discovery/model/data/data/mydata/train-supervised.txt')
+    parser.add_argument('--val_file', type=str, default='../new-NER-discovery/model/data/data/mydata/val-supervised.txt')
+    parser.add_argument('--test_file', type=str, default='../new-NER-discovery/model/data/data/mydata/test-supervised.txt')
     parser.add_argument('--epoch', type=int, default=10)
     parser.add_argument('--lr', type=float, default=1e-5)
     parser.add_argument('--lr_step_size', type=int, default=200)
@@ -46,17 +46,41 @@ def main():
     parser.add_argument('--save_dir', type=str, default='checkpoint')
 
     args = parser.parse_args()
-
+    # set random seed
     set_seed(args.seed)
+    # model checkpoint saving path
+    import os
+    import datetime
+    train_file = args.train_file.split('/')[-1]
+    model_save_dir = os.path.join(args.save_dir, f'{args.model_name}-{train_file}-seed_{args.seed}')
+    if not os.path.exists(args.save_dir):
+        os.mkdir(args.save_dir)
+    if not os.path.exists(model_save_dir):
+        os.mkdir(model_save_dir)
+    args.model_save_dir = model_save_dir
+
+    # result log saving path
+    result_save_dir = 'result/'
+    if not os.path.exists(result_save_dir):
+        os.mkdir(result_save_dir)
+    now = datetime.datetime.now().strftime("%Y-%m-%d-%H:%M:%S")
+    result_save_path = os.path.join(result_save_dir, now+'.json')
+    resultlog = ResultLog(args, result_save_path)
+    
 
     # get tag list
     print('get tag list...')
-    tag_list = load_tag_list(args.tag_list_file)
+    tag_mapping = load_tag_mapping(args.tag_list_file)
+    tag_list = list(set(tag_mapping.values()))
     out_dim = len(tag_list)
+    tag2idx = {tag:idx for idx, tag in enumerate(tag_list)}
+    idx2tag = {idx:tag for idx, tag in enumerate(tag_list)}
+
     # initialize tokenizer and model
     print('initializing model...')
     tokenizer = get_tokenizer(args.model_name)
-    model = MaskedModel(args.model_name, out_dim).cuda()
+    tag2inputid = get_tag2inputid(tokenizer, tag_list)
+    model = MaskedModel(args.model_name, idx2tag, tag2inputid, out_dim=out_dim).cuda()
 
     Loss = nn.CrossEntropyLoss()
     optimizer = AdamW(model.parameters(), lr=args.lr)
@@ -64,9 +88,9 @@ def main():
 
     # initialize dataloader
     print('initializing data...')
-    train_dataloader = get_loader(args.train_file, tokenizer, args.batch_size, args.max_length, args.sample_num, tag_list)
-    val_dataloader = get_loader(args.val_file, tokenizer, args.val_batch_size, args.max_length, args.sample_num, tag_list)
-    test_dataloader = get_loader(args.test_file, tokenizer, args.val_batch_size, args.max_length, args.sample_num, tag_list)
+    train_dataloader = get_loader(args.train_file, tokenizer, args.batch_size, args.max_length, args.sample_num, tag2idx, tag_mapping)
+    val_dataloader = get_loader(args.val_file, tokenizer, args.val_batch_size, args.max_length, args.sample_num, tag2idx, tag_mapping)
+    test_dataloader = get_loader(args.test_file, tokenizer, args.val_batch_size, args.max_length, args.sample_num, tag2idx, tag_mapping)
     # train
     print('######### start training ##########')
     epoch = args.epoch
@@ -76,7 +100,11 @@ def main():
         model.train()
         step_loss = []
         step_acc = []
-        j = 0
+        # result for each epoch
+        result_data = {}
+        epoch_acc = []
+        epoch_loss = []
+        epoch_val_acc = []
 
         for data in tqdm(train_dataloader):
             to_cuda(data)
@@ -97,28 +125,39 @@ def main():
                 optimizer.step()
                 scheduler.step()
                 optimizer.zero_grad()
+                print()
                 print('[TRAIN STEP %d] loss: %.4f, accuracy: %.4f%%' % (step, np.mean(step_loss), np.mean(step_acc)*100))
                 print()
+
+                epoch_acc.append(np.mean(step_acc))
+                epoch_loss.append(np.mean(step_loss))
 
                 step_loss = []
                 step_acc = []
                 torch.cuda.empty_cache()
 
+        result_data['train_acc'] = np.mean(epoch_acc)
+        result_data['train_loss'] = np.mean(epoch_loss)
+
         # validation
         print('########### start validating ##########')
         with torch.no_grad():
             model.eval()
-            epoch_acc = []
             for data in tqdm(val_dataloader):
                 to_cuda(data)
                 _, tag_score = model(data)
                 tag_pred = torch.argmax(tag_score, dim=1)
                 acc = accuracy_score(data['tag_labels'].cpu().numpy(), tag_pred.cpu().numpy())
-                epoch_acc.append(acc)
-            print('[EPOCH %d EVAL RESULT] accuracy: %.4f%%' % (i, np.mean(epoch_acc)))
-            torch.save(model, args.save_dir+f'/{args.model_name}-checkpoint-{i}')
+                epoch_val_acc.append(acc)
+            print('[EPOCH %d EVAL RESULT] accuracy: %.4f%%' % (i, np.mean(epoch_acc)*100))
+            result_data['val_acc'] = np.mean(epoch_val_acc)
+            torch.save(model, args.model_save_dir + f'/checkpoint-{i}')
             print('checkpoint saved')
             print()
+
+            # save training result
+            resultlog.update(i, result_data)
+            print('result log saved')
 
 if __name__ == '__main__':
     main()
