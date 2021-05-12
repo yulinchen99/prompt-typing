@@ -48,6 +48,6 @@ class ResultLog:
         data = {train_acc: , test_acc: , train_loss: }
         '''
         with open(self.save_path, 'r+')as f:
-            d = json.loads(f)
+            d = json.load(f)
             d['result'][epoch] = data
             f.write(json.dumps(d))

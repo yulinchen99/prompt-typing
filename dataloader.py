@@ -3,8 +3,6 @@ import torch.utils.data as data
 import os
 import numpy as np
 import random
-import json
-from sklearn.preprocessing import LabelEncoder
 import copy
 from transformers import BertTokenizer, AutoConfig, RobertaConfig, BertConfig, RobertaTokenizer
 # from word_encoder import BERTWordEncoder
