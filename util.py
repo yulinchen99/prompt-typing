@@ -49,5 +49,7 @@ class ResultLog:
         '''
         with open(self.save_path, 'r+')as f:
             d = json.load(f)
+            f.seek(0)
+            f.truncate()
             d['result'][epoch] = data
             f.write(json.dumps(d))
