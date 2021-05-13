@@ -10,6 +10,7 @@ import torch
 from tqdm import tqdm
 import random
 import warnings
+from transformers import get_linear_schedule_with_warmup
 #from memory_profiler import profile
 
 warnings.filterwarnings('ignore')
@@ -43,6 +44,7 @@ def main():
     parser.add_argument('--lr', type=float, default=1e-5)
     parser.add_argument('--lr_step_size', type=int, default=200)
     parser.add_argument('--grad_accum_step', type=int, default=10)
+    parser.add_argument('--warmup_step', type=int, default=100)
     parser.add_argument('--save_dir', type=str, default='checkpoint')
 
     args = parser.parse_args()
@@ -52,7 +54,7 @@ def main():
     import os
     import datetime
     train_file = args.train_file.split('/')[-1]
-    model_save_dir = os.path.join(args.save_dir, f'{args.model_name}-{train_file}-seed_{args.seed}')
+    model_save_dir = os.path.join(args.save_dir, f'{args.model_name}-{args.tag_list_file}-{train_file}-seed_{args.seed}')
     if not os.path.exists(args.save_dir):
         os.mkdir(args.save_dir)
     if not os.path.exists(model_save_dir):
@@ -77,20 +79,22 @@ def main():
     idx2tag = {idx:tag for idx, tag in enumerate(tag_list)}
 
     # initialize tokenizer and model
-    print('initializing model...')
+    print('initializing tokenizer and model...')
     tokenizer = get_tokenizer(args.model_name)
     tag2inputid = get_tag2inputid(tokenizer, tag_list)
     model = MaskedModel(args.model_name, idx2tag, tag2inputid, out_dim=out_dim).cuda()
-
-    Loss = nn.CrossEntropyLoss()
-    optimizer = AdamW(model.parameters(), lr=args.lr)
-    scheduler = lr_scheduler.StepLR(optimizer, step_size=args.lr_step_size)
 
     # initialize dataloader
     print('initializing data...')
     train_dataloader = get_loader(args.train_file, tokenizer, args.batch_size, args.max_length, args.sample_num, tag2idx, tag_mapping)
     val_dataloader = get_loader(args.val_file, tokenizer, args.val_batch_size, args.max_length, args.sample_num, tag2idx, tag_mapping)
     test_dataloader = get_loader(args.test_file, tokenizer, args.val_batch_size, args.max_length, args.sample_num, tag2idx, tag_mapping)
+
+    Loss = nn.CrossEntropyLoss()
+    optimizer = AdamW(model.parameters(), lr=args.lr)
+    global_train_iter = int(args.epoch * len(train_dataloader) / args.grad_accum_step) + 1
+    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_step, num_training_steps=global_train_iter)
+
     # train
     print('######### start training ##########')
     epoch = args.epoch
