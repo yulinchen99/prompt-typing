@@ -36,8 +36,8 @@ def main():
     parser.add_argument('--model_name', type=str, default='bert-base-cased')
     parser.add_argument('--max_length', type=int, default=64)
     parser.add_argument('--sample_num', type=int, default=1)
-    parser.add_argument('--batch_size', type=int, default=8)
-    parser.add_argument('--val_batch_size', type=int, default=16)
+    parser.add_argument('--batch_size', type=int, default=16)
+    parser.add_argument('--val_batch_size', type=int, default=32)
     parser.add_argument('--tag_list_file', type=str, default='tag_list_coarse.txt')
     parser.add_argument('--train_file', type=str, default='../new-NER-discovery/model/data/data/mydata/train-supervised.txt')
     parser.add_argument('--val_file', type=str, default='../new-NER-discovery/model/data/data/mydata/val-supervised.txt')
@@ -91,7 +91,9 @@ def main():
     print('initializing tokenizer and model...')
     tokenizer = get_tokenizer(args.model_name)
     prompt = [args.sep_token, args.predicate_token, args.article_token]
-    tokenizer.add_special_tokens({'additional_special_tokens':prompt})
+    #tokenizer.add_special_tokens({'additional_special_tokens':prompt})
+    tokenizer.add_tokens(prompt)
+
     tag2inputid = get_tag2inputid(tokenizer, tag_list)
     vocab_size = tokenizer.vocab_size+len(prompt)
     if 'roberta' in args.model_name:

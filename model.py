@@ -11,6 +11,7 @@ class MaskedModel(nn.Module):
             self.model = BertForMaskedLM(config).from_pretrained(model_name)
         else:
             print('unsupported model name')
+        self.model.resize_token_embeddings(config.vocab_size)
         self.model = nn.DataParallel(self.model)
         self.idx2tag = idx2tag
         self.tag2inputid = tag2inputid
