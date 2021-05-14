@@ -96,8 +96,8 @@ class OpenNERDataset(data.Dataset):
         self.tag2id = tag2idx
         self.tag_mapping = tag_mapping
         self.col_num = col_num
-        self.__load_data_from_file__(filepath)
         self.prompt = prompt
+        self.__load_data_from_file__(filepath)
     
     def __load_data_from_file__(self, filepath):
         with open(filepath, 'r', encoding='utf-8')as f:
