@@ -1,4 +1,5 @@
 import argparse
+from transformers import BertConfig, RobertaConfig
 from dataloader_ontonote import get_loader, get_tokenizer, OpenNERDataset, Sample
 from model import MaskedModel
 from util import get_tag2inputid, ResultLog
@@ -92,7 +93,12 @@ def main():
     prompt = [args.sep_token, args.predicate_token, args.article_token]
     tokenizer.add_special_tokens({'additional_special_tokens':prompt})
     tag2inputid = get_tag2inputid(tokenizer, tag_list)
-    model = MaskedModel(args.model_name, idx2tag, tag2inputid, out_dim=out_dim).cuda()
+    vocab_size = tokenizer.vocab_size+len(prompt)
+    if 'roberta' in args.model_name:
+        config = RobertaConfig(vocab_size=vocab_size)
+    elif 'bert' in args.model_name:
+        config = BertConfig(vocab_size=vocab_size)
+    model = MaskedModel(args.model_name, config, idx2tag, tag2inputid, out_dim=out_dim).cuda()
 
     # initialize dataloader
     print('initializing data...')

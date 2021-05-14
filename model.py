@@ -3,13 +3,12 @@ import torch
 import torch.nn as nn
 from transformers import AutoConfig, RobertaConfig, BertConfig, RobertaForMaskedLM, BertForMaskedLM
 class MaskedModel(nn.Module):
-    def __init__(self, model_name, idx2tag, tag2inputid, out_dim=None, uselinear=False):
+    def __init__(self, model_name, config, idx2tag, tag2inputid, out_dim=None, uselinear=False):
         nn.Module.__init__(self)
-        config = AutoConfig.from_pretrained(model_name)
         if isinstance(config, RobertaConfig):
-            self.model = RobertaForMaskedLM.from_pretrained(model_name)
+            self.model = RobertaForMaskedLM(config).from_pretrained(model_name)
         elif isinstance(config, BertConfig):
-            self.model = BertForMaskedLM.from_pretrained(model_name)
+            self.model = BertForMaskedLM(config).from_pretrained(model_name)
         else:
             print('unsupported model name')
         self.model = nn.DataParallel(self.model)

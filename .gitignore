@@ -106,3 +106,5 @@ checkpoint/
 .vscode/
 result/
 *.out
+*deprecated.py
+test-result/
