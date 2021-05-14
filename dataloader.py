@@ -122,10 +122,6 @@ class OpenNERDataset(data.Dataset):
         # get raw data
         data = self.samples[index].get_samples(self.sample_num, self.max_length)
         # tokenize
-        '''
-        if not data:
-            return {'word_input':[], 'word_labels':[], 'tag_input':[], 'tag_labels':[], 'word_mask':[], 'tag_mask':[]}
-        '''
         word_input, word_mask = self.tokenize(data['word_input'])
         tag_input, tag_mask = self.tokenize(data['tag_input'])
         word_labels, _ = self.tokenize(data['word_labels'])

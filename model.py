@@ -46,8 +46,11 @@ class MaskedModel(nn.Module):
             tag_score = self.__get_tag_logits__(tag_score)
         return tag_score
 
-    def forward(self, inputs):
-        word_loss = self.model(input_ids=inputs['word_input'], attention_mask=inputs['word_mask'], labels=inputs['word_labels']).loss
+    def forward(self, inputs, tag_only=True):
         tag_output = self.model(input_ids=inputs['tag_input'], attention_mask=inputs['tag_mask'],output_hidden_states=True)
         tag_score = self.__get_tag_score__(tag_output, inputs)
-        return torch.mean(word_loss), tag_score
+        if not tag_only:
+            word_loss = self.model(input_ids=inputs['word_input'], attention_mask=inputs['word_mask'], labels=inputs['word_labels']).loss
+            return torch.mean(word_loss), tag_score
+        else:
+            return tag_score

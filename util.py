@@ -11,7 +11,7 @@ def load_tag_mapping(filepath):
     return tag_mapping
 
 def get_tag2inputid(tokenizer, tags):
-    splitted_tags = [tag.split('/') for tag in tags]
+    splitted_tags = [list(set(tag.split('/'))) for tag in tags]
     d ={}
     for i, splitted_tag in enumerate(splitted_tags):
         d[tags[i]] = tokenizer.convert_tokens_to_ids(splitted_tag)
