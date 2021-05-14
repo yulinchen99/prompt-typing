@@ -22,10 +22,11 @@ def load_tag_mapping(filepath):
     return dict(zip(tags, newtags))
 
 # %%
-from collections import Counter
-d = load_tag_mapping('OntoNotes-89/train_clean.tsv')
-print(d)
-print(len(d))
-cnt = Counter(d.values())
-print(cnt)
+if __name__ == '__main__':
+    from collections import Counter
+    d = load_tag_mapping('OntoNotes-89/train_clean.tsv')
+    print(d)
+    print(len(d))
+    cnt = Counter(d.values())
+    print(cnt)
 # %%

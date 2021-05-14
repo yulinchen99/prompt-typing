@@ -148,9 +148,7 @@ def main():
                 optimizer.zero_grad()
 
                 if step % (args.grad_accum_step*10) == 0:
-                    print()
                     print('[TRAIN STEP %d] loss: %.4f, accuracy: %.4f%%' % (step, np.mean(step_loss), np.mean(step_acc)*100))
-                    print()
 
                 epoch_acc.append(np.mean(step_acc))
                 epoch_loss.append(np.mean(step_loss))
