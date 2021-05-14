@@ -48,6 +48,9 @@ def main():
     parser.add_argument('--warmup_step', type=int, default=100)
     parser.add_argument('--save_dir', type=str, default='checkpoint')
     parser.add_argument('--checkpoint_num', type=int, default=0)
+    parser.add_argument('--sep_token', type=str, default='[P]')
+    parser.add_argument('--predicate_token', type=str, default='[P1]')
+    parser.add_argument('--article_token', type=str, default='[P2]')
 
 
     args = parser.parse_args()
@@ -86,20 +89,12 @@ def main():
     print('loading model...')
     tokenizer = get_tokenizer(args.model_name)
     tag2inputid = get_tag2inputid(tokenizer, tag_list)
-    #model = MaskedModel(args.model_name, idx2tag, tag2inputid, out_dim=out_dim).cuda()
     model = torch.load(args.model_save_dir)
 
     # initialize dataloader
     print('initializing data...')
-    #train_dataloader = get_loader(args.train_file, tokenizer, args.batch_size, args.max_length, args.sample_num, tag2idx, tag_mapping, 4)
-    #val_dataloader = get_loader(args.val_file, tokenizer, args.val_batch_size, args.max_length, args.sample_num, tag2idx, tag_mapping, 3)
-    test_dataloader = get_loader(args.test_file, tokenizer, args.val_batch_size, args.max_length, args.sample_num, tag2idx, tag_mapping, 4)
-
-    #Loss = nn.CrossEntropyLoss()
-    #optimizer = AdamW(model.parameters(), lr=args.lr)
-    #global_train_iter = int(args.epoch * len(train_dataloader) / args.grad_accum_step) + 1
-    #scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_step, num_training_steps=global_train_iter)
-
+    prompt = [args.sep_token, args.predicate_token, args.article_token]
+    test_dataloader = get_loader(args.test_file, tokenizer, args.val_batch_size, args.max_length, args.sample_num, tag2idx, tag_mapping, 4, prompt)
 
     # test
     print('########### start testing ##########')
@@ -121,7 +116,7 @@ def main():
         print('[EVAL RESULT] accuracy: %.4f%%' % (accuracy_score(y_true, y_pred)*100))
         print()
 
-        # save training result
+        # save test result
         resultlog.update(f'checkpoint-{args.checkpoint_num}', result_data)
         print('result log saved')
 
