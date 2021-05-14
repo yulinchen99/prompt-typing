@@ -16,9 +16,7 @@ class Sample:
         self.mask = mask
         self.map_tags(tag_mapping)
         self.__get_entities__()
-        self.sep = prompt[0]
-        self.predicate = prompt[1]
-        self.article = prompt[2]
+        self.prompt = prompt
 
     def __get_entities__(self):
         current_tag = None
@@ -36,7 +34,7 @@ class Sample:
                     entity_pos.append(idx)
                 current_tag = tag
 
-    def get_samples(self, sample_num, max_length):
+    def get_samples(self, sample_num):
         tmp_candidate_items = copy.deepcopy(self.candidate_items)
         if len(self.candidate_items) > sample_num:
             tmp_candidate_items = random.sample(tmp_candidate_items, sample_num)
@@ -50,7 +48,7 @@ class Sample:
         labels = []
         for pos, tag in sampled_entities:
             masked = list(copy.deepcopy(self.words[:self.max_length]))
-            masked += masked[pos[0]:pos[1]] + [self.sep, self.predicate, self.article, self.mask]
+            masked += [self.prompt[0]] + masked[pos[0]:pos[1]] + self.prompt[1:] + [self.mask]
             inputs.append(masked)
             labels.append(tag)
         return inputs, labels
@@ -122,7 +120,7 @@ class OpenNERDataset(data.Dataset):
             for i in range(start, end):
                 # select the last tag
                 tags[i] = tag
-            sample = Sample(words, tags, self.max_length, self.tokenizer.mask_token, self.tag_mapping, ['[P]', '[P1]', '[P2]'])
+            sample = Sample(words, tags, self.max_length, self.tokenizer.mask_token, self.tag_mapping, self.prompt)
             if not sample.empty():
                 self.samples.append(sample)
 
@@ -132,7 +130,7 @@ class OpenNERDataset(data.Dataset):
     
     def __getitem__(self, index):
         # get raw data
-        data = self.samples[index].get_samples(self.sample_num, self.max_length)
+        data = self.samples[index].get_samples(self.sample_num)
         # tokenize
         '''
         if not data:
@@ -168,7 +166,6 @@ def collate_fn(data):
         return seq
     batch_data = {'word_input':[], 'word_labels':[], 'tag_input':[], 'tag_labels':[], 'word_mask':[], 'tag_mask':[]}
     # padding
-    #print(max_length)
     for d in data:
         for name in d:
             if name == 'tag_labels':
@@ -179,7 +176,6 @@ def collate_fn(data):
                     batch_data[name].append(pad(seq))
     for name in batch_data:
         batch_data[name] = torch.LongTensor(batch_data[name])
-    # assert batch_data['word_input'].shape == batch_data['word_mask'].shape, print(batch_data['word_input'].shape, batch_data['word_mask'].shape)
     return batch_data
 
 def get_loader(filepath, tokenizer, batch_size, max_length, sample_num, tag_list, tag_mapping, col_num, prompt, num_workers=8, collate_fn=collate_fn):
@@ -208,7 +204,7 @@ if __name__ == '__main__':
     print('initializing tokenizer and model...')
     tokenizer = get_tokenizer('bert-base-cased')
     prompt = ['[P]', '[P1]', '[P2]']
-    tokenizer.add_special_tokens({'additional_special_tokens':prompt})
+    tokenizer.add_tokens(prompt)
     # %%
     print(tokenizer.convert_tokens_to_ids('I got to new york [P] new york [P1] [P2] [MASK]'.split()))
     #tag2inputid = get_tag2inputid(tokenizer, tag_list)

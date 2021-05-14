@@ -48,9 +48,7 @@ def main():
     parser.add_argument('--grad_accum_step', type=int, default=10)
     parser.add_argument('--warmup_step', type=int, default=100)
     parser.add_argument('--save_dir', type=str, default='checkpoint')
-    parser.add_argument('--sep_token', type=str, default='[P]')
-    parser.add_argument('--predicate_token', type=str, default='[P1]')
-    parser.add_argument('--article_token', type=str, default='[P2]')
+    parser.add_argument('--prompt', type=str, default='[P]-[P1]-[P2]')
 
 
     args = parser.parse_args()
@@ -61,7 +59,7 @@ def main():
     import datetime
     train_file = args.train_file.split('/')[-1]
     tag_list_file = args.tag_list_file.split('/')[-1]
-    model_save_dir = os.path.join(args.save_dir, f'{args.model_name}-{tag_list_file}-{train_file}-seed_{args.seed}')
+    model_save_dir = os.path.join(args.save_dir, f'{args.model_name}-{tag_list_file}-{train_file}-{args.prompt}-seed_{args.seed}')
     if not os.path.exists(args.save_dir):
         os.mkdir(args.save_dir)
     if not os.path.exists(model_save_dir):
@@ -90,12 +88,11 @@ def main():
     # initialize tokenizer and model
     print('initializing tokenizer and model...')
     tokenizer = get_tokenizer(args.model_name)
-    prompt = [args.sep_token, args.predicate_token, args.article_token]
-    #tokenizer.add_special_tokens({'additional_special_tokens':prompt})
-    tokenizer.add_tokens(prompt)
+    prompt = args.prompt.split('-')
+    added_num = tokenizer.add_tokens(prompt)
 
     tag2inputid = get_tag2inputid(tokenizer, tag_list)
-    vocab_size = tokenizer.vocab_size+len(prompt)
+    vocab_size = tokenizer.vocab_size + added_num
     if 'roberta' in args.model_name:
         config = RobertaConfig(vocab_size=vocab_size)
     elif 'bert' in args.model_name:
@@ -106,7 +103,7 @@ def main():
     print('initializing data...')
     train_dataloader = get_loader(args.train_file, tokenizer, args.batch_size, args.max_length, args.sample_num, tag2idx, tag_mapping, 4, prompt)
     val_dataloader = get_loader(args.val_file, tokenizer, args.val_batch_size, args.max_length, args.sample_num, tag2idx, tag_mapping, 3, prompt)
-    test_dataloader = get_loader(args.test_file, tokenizer, args.val_batch_size, args.max_length, args.sample_num, tag2idx, tag_mapping, 4, prompt)
+    # test_dataloader = get_loader(args.test_file, tokenizer, args.val_batch_size, args.max_length, args.sample_num, tag2idx, tag_mapping, 4, prompt)
 
     Loss = nn.CrossEntropyLoss()
     optimizer = AdamW(model.parameters(), lr=args.lr)
@@ -117,28 +114,30 @@ def main():
     print('######### start training ##########')
     epoch = args.epoch
     step = 0
+    result_data = {}
+    step_acc = []
+    step_loss = []
+    step_val_acc = []
+    train_step_loss = []
+    train_step_acc = []
     for i in range(epoch):
         print(f'---------epoch {i}---------')
         model.train()
-        step_loss = []
-        step_acc = []
         # result for each epoch
-        result_data = {}
-        epoch_acc = []
-        epoch_loss = []
-        epoch_val_acc = []
-
         for data in train_dataloader:
             to_cuda(data)
             tag_score = model(data)
             loss = Loss(tag_score, data['tag_labels'])
             loss.backward()
-            step_loss.append(loss.item())
+            train_step_loss.append(loss.item())
 
             tag_pred = torch.argmax(tag_score, dim=1)
             del tag_score
             acc = accuracy_score(data['tag_labels'].cpu().numpy(), tag_pred.cpu().numpy())
+            train_step_acc.append(acc)
+
             step_acc.append(acc)
+            step_loss.append(loss.item())
 
             step += 1
 
@@ -148,37 +147,36 @@ def main():
                 optimizer.zero_grad()
 
                 if step % (args.grad_accum_step*10) == 0:
-                    print('[TRAIN STEP %d] loss: %.4f, accuracy: %.4f%%' % (step, np.mean(step_loss), np.mean(step_acc)*100))
+                    print('[TRAIN STEP %d] loss: %.4f, accuracy: %.4f%%' % (step, np.mean(train_step_loss), np.mean(train_step_acc)*100))
+                    train_step_loss = []
+                    train_step_acc = []
+                    torch.cuda.empty_cache()
 
-                epoch_acc.append(np.mean(step_acc))
-                epoch_loss.append(np.mean(step_loss))
+            # validation
+            if step % 2000 == 0:
+                print('########### start validating ##########')
+                with torch.no_grad():
+                    model.eval()
+                    for data in tqdm(val_dataloader):
+                        to_cuda(data)
+                        tag_score = model(data)
+                        tag_pred = torch.argmax(tag_score, dim=1)
+                        acc = accuracy_score(data['tag_labels'].cpu().numpy(), tag_pred.cpu().numpy())
+                        step_val_acc.append(acc)
+                    print('[STEP %d EVAL RESULT] accuracy: %.4f%%' % (step, np.mean(step_val_acc)*100))
+                    result_data['val_acc'] = np.mean(step_val_acc)
+                    torch.save(model, args.model_save_dir + f'/checkpoint-{step}')
+                    print('checkpoint saved')
+                    print()
+                    # save training result
+                    result_data['train_acc'] = np.mean(step_acc)
+                    result_data['train_loss'] = np.mean(step_loss)
+                    resultlog.update(step, result_data)
+                    print('result log saved')
 
-                step_loss = []
-                step_acc = []
-                torch.cuda.empty_cache()
-
-        result_data['train_acc'] = np.mean(epoch_acc)
-        result_data['train_loss'] = np.mean(epoch_loss)
-
-        # validation
-        print('########### start validating ##########')
-        with torch.no_grad():
-            model.eval()
-            for data in tqdm(val_dataloader):
-                to_cuda(data)
-                tag_score = model(data)
-                tag_pred = torch.argmax(tag_score, dim=1)
-                acc = accuracy_score(data['tag_labels'].cpu().numpy(), tag_pred.cpu().numpy())
-                epoch_val_acc.append(acc)
-            print('[EPOCH %d EVAL RESULT] accuracy: %.4f%%' % (i, np.mean(epoch_val_acc)*100))
-            result_data['val_acc'] = np.mean(epoch_val_acc)
-            torch.save(model, args.model_save_dir + f'/checkpoint-{i}')
-            print('checkpoint saved')
-            print()
-
-            # save training result
-            resultlog.update(i, result_data)
-            print('result log saved')
+                    step_acc = []
+                    step_loss = []
+                    step_val_acc = []
 
 if __name__ == '__main__':
     main()

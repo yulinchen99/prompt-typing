@@ -1,5 +1,6 @@
 import argparse
 from dataloader_ontonote import get_loader, get_tokenizer, OpenNERDataset, Sample
+from transformers import BertConfig, RobertaConfig
 from model import MaskedModel
 from util import get_tag2inputid, ResultLog
 from get_ontonotes_tags import load_tag_mapping
@@ -86,14 +87,22 @@ def main():
     idx2tag = {idx:tag for idx, tag in enumerate(tag_list)}
 
     # initialize tokenizer and model
-    print('loading model...')
+    print('loading model from %s...'%(args.model_save_dir))
     tokenizer = get_tokenizer(args.model_name)
+    prompt = [args.sep_token, args.predicate_token, args.article_token]
+    tokenizer.add_tokens(prompt)
     tag2inputid = get_tag2inputid(tokenizer, tag_list)
-    model = torch.load(args.model_save_dir)
+    vocab_size = tokenizer.vocab_size + len(prompt)
+    if 'roberta' in args.model_name:
+        config = RobertaConfig(vocab_size=vocab_size)
+    elif 'bert' in args.model_name:
+        config = BertConfig(vocab_size=vocab_size)
+    model = MaskedModel(args.model_name, config, idx2tag, tag2inputid, out_dim=out_dim).cuda()
+    model_dict = torch.load(args.model_save_dir).state_dict()
+    model.load_state_dict(model_dict)
 
     # initialize dataloader
     print('initializing data...')
-    prompt = [args.sep_token, args.predicate_token, args.article_token]
     test_dataloader = get_loader(args.test_file, tokenizer, args.val_batch_size, args.max_length, args.sample_num, tag2idx, tag_mapping, 4, prompt)
 
     # test
@@ -105,8 +114,10 @@ def main():
         model.eval()
         for data in tqdm(test_dataloader):
             to_cuda(data)
-            _, tag_score = model(data)
+            tag_score = model(data)
             tag_pred = torch.argmax(tag_score, dim=1)
+            #print(tag_pred)
+            #print(data['tag_labels'])
             y_pred += tag_pred.cpu().numpy().tolist()
             y_true += data['tag_labels'].cpu().numpy().tolist()
         result_data['test_acc'] = accuracy_score(y_true, y_pred)
