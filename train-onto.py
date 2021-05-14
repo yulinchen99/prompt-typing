@@ -170,7 +170,7 @@ def main():
                 tag_pred = torch.argmax(tag_score, dim=1)
                 acc = accuracy_score(data['tag_labels'].cpu().numpy(), tag_pred.cpu().numpy())
                 epoch_val_acc.append(acc)
-            print('[EPOCH %d EVAL RESULT] accuracy: %.4f%%' % (i, np.mean(epoch_acc)*100))
+            print('[EPOCH %d EVAL RESULT] accuracy: %.4f%%' % (i, np.mean(epoch_val_acc)*100))
             result_data['val_acc'] = np.mean(epoch_val_acc)
             torch.save(model, args.model_save_dir + f'/checkpoint-{i}')
             print('checkpoint saved')
