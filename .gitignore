@@ -108,3 +108,5 @@ result/
 *.out
 *deprecated.py
 test-result/
+*.log
+*.slurm

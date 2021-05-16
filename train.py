@@ -1,7 +1,9 @@
 import argparse
-from dataloader import get_loader, get_tokenizer, OpenNERDataset, Sample
-from model import MaskedModel
-from util import load_tag_mapping, get_tag2inputid, ResultLog
+from transformers import BertConfig, RobertaConfig
+from util.data_loader import get_loader
+from model.baseline import EntityTypingModel as BaselineModel
+from model.maskedlm import EntityTypingModel as MaskedLM
+from util.util import load_tag_mapping, get_tag2inputid, get_mapped_tag_list, ResultLog, get_tokenizer
 import torch.nn as nn
 from torch.optim import AdamW, lr_scheduler
 from sklearn.metrics import accuracy_score
@@ -11,6 +13,8 @@ from tqdm import tqdm
 import random
 import warnings
 from transformers import get_linear_schedule_with_warmup
+import os
+import datetime
 #from memory_profiler import profile
 
 warnings.filterwarnings('ignore')
@@ -24,42 +28,103 @@ def set_seed(seed):
 
 def to_cuda(data):
     for item in data:
-        data[item] = data[item].cuda()
+        if isinstance(data[item], torch.LongTensor):
+            data[item] = data[item].cuda()
 
 # @profile(precision=4,stream=open('memory_profiler.log','w+'))
 def main():
     # param
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=0)
-    parser.add_argument('--model_name', type=str, default='bert-base-cased')
+    parser.add_argument('--model_name', type=str, default='roberta-base')
     parser.add_argument('--max_length', type=int, default=64)
-    parser.add_argument('--sample_num', type=int, default=1)
     parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--val_batch_size', type=int, default=32)
-    parser.add_argument('--tag_list_file', type=str, default='tag_list_coarse.txt')
-    parser.add_argument('--train_file', type=str, default='../new-NER-discovery/model/data/data/mydata/train-supervised.txt')
-    parser.add_argument('--val_file', type=str, default='../new-NER-discovery/model/data/data/mydata/val-supervised.txt')
-    parser.add_argument('--test_file', type=str, default='../new-NER-discovery/model/data/data/mydata/test-supervised.txt')
+    parser.add_argument('--data', type=str, default='ontonote', help='ontonote, fewnerd or bbn')
+    parser.add_argument('--model', type=str, default='maskedlm', help='baseline or maskedlm')
     parser.add_argument('--epoch', type=int, default=10)
     parser.add_argument('--lr', type=float, default=1e-5)
+    parser.add_argument('--embed_lr', type=float, default=1e-4)
     parser.add_argument('--lr_step_size', type=int, default=200)
     parser.add_argument('--grad_accum_step', type=int, default=10)
     parser.add_argument('--warmup_step', type=int, default=100)
+    parser.add_argument('--val_step', type=int, default=2000, help='val every x steps of training')
     parser.add_argument('--save_dir', type=str, default='checkpoint')
+    parser.add_argument('--prompt', type=str, default='[P]-[P1]-[P2]')
+    parser.add_argument('--highlight_entity', type=str, default=None, help='for baseline model, highlight tokens around entity')
+    parser.add_argument('--test_only', action='store_true', default=False)
+    parser.add_argument('--dual_optim', action='store_true', default=False, help='set True if separate learning rate in maskedlm p-prompt setting is desired')
+
 
     args = parser.parse_args()
     # set random seed
     set_seed(args.seed)
-    # model checkpoint saving path
-    import os
-    import datetime
-    train_file = args.train_file.split('/')[-1]
-    model_save_dir = os.path.join(args.save_dir, f'{args.model_name}-{args.tag_list_file}-{train_file}-seed_{args.seed}')
+
+    # data path
+    args.data = os.path.join('data', args.data)
+
+    # model saving path
+    data = args.data.split('/')[-1]
+    MODEL_SAVE_PATH = os.path.join(args.save_dir, f'{args.model}-{args.model_name}-{data}-{args.prompt}-seed_{args.seed}')
     if not os.path.exists(args.save_dir):
         os.mkdir(args.save_dir)
-    if not os.path.exists(model_save_dir):
-        os.mkdir(model_save_dir)
-    args.model_save_dir = model_save_dir
+    args.model_save_path = MODEL_SAVE_PATH
+    print('modelsave path:', MODEL_SAVE_PATH)
+    
+    # prompt
+    PROMPT = None
+    IS_P_PROMPT = False
+    HIGHLIGHT_ENTITY = None
+    if args.prompt:
+        PROMPT = args.prompt.split('-')
+    if '[P]' in PROMPT:
+        IS_P_PROMPT = True
+    if args.highlight_entity is not None:
+        HIGHLIGHT_ENTITY = args.highlight_entity.split('-')
+
+    # check dual_optim
+    if args.dual_optim and ((not IS_P_PROMPT) or args.model == 'baseline'):
+        print('[ERROR] dual_optim is only supported in MaskedLM and is_p_promt setting')
+        raise ValueError    
+
+    # get tag list
+    print('get tag list...')
+    tag_mapping = load_tag_mapping(args.data)
+    mapped_tag_list = get_mapped_tag_list(args.data, tag_mapping)
+    out_dim = len(mapped_tag_list)
+    tag2idx = {tag:idx for idx, tag in enumerate(mapped_tag_list)}
+    idx2tag = {idx:tag for idx, tag in enumerate(mapped_tag_list)}
+    print(tag2idx)
+
+    # initialize model
+    print('initializing model...')
+    tokenizer = get_tokenizer(args.model_name)
+    if args.model == 'baseline':
+        model = BaselineModel(args.model_name, idx2tag, mapped_tag_list, out_dim, highlight_entity=HIGHLIGHT_ENTITY)
+    elif args.model == 'maskedlm':
+        model = MaskedLM(args.model_name, idx2tag, mapped_tag_list, prompt=PROMPT, is_p_prompt=IS_P_PROMPT)
+    else:
+        raise NotImplementedError
+    model = model.cuda()
+
+    # initialize dataloader
+    print(f'initializing data from {args.data}...')
+    train_dataloader = get_loader(args.data, 'train', args.batch_size, args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
+    val_dataloader = get_loader(args.data, 'dev', args.val_batch_size, args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
+    test_dataloader = get_loader(args.data, 'test', args.val_batch_size, args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
+
+    Loss = nn.CrossEntropyLoss()
+    if args.dual_optim:
+        print(f'using dual optim, embed_lr: {args.embed:lr}, lr:{args.lr}')
+        bert_param = [p for p in model.parameters() if id(p) not in list(map(id, model.prompt_embedding.parameters()))]
+        optimizer = AdamW([
+                {'params': bert_param},
+                {'params': model.prompt_embedding.parameters(), 'lr': args.embed_lr}
+            ], lr=args.lr)
+    else:
+        optimizer = AdamW(model.parameters(), lr=args.lr)
+    global_train_iter = int(args.epoch * len(train_dataloader) / args.grad_accum_step + 0.5)
+    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_step, num_training_steps=global_train_iter)
 
     # result log saving path
     result_save_dir = 'result/'
@@ -68,100 +133,108 @@ def main():
     now = datetime.datetime.now().strftime("%Y-%m-%d-%H:%M:%S")
     result_save_path = os.path.join(result_save_dir, now+'.json')
     resultlog = ResultLog(args, result_save_path)
-    
-
-    # get tag list
-    print('get tag list...')
-    tag_mapping = load_tag_mapping(args.tag_list_file)
-    tag_list = list(set(tag_mapping.values()))
-    out_dim = len(tag_list)
-    tag2idx = {tag:idx for idx, tag in enumerate(tag_list)}
-    idx2tag = {idx:tag for idx, tag in enumerate(tag_list)}
-
-    # initialize tokenizer and model
-    print('initializing tokenizer and model...')
-    tokenizer = get_tokenizer(args.model_name)
-    tag2inputid = get_tag2inputid(tokenizer, tag_list)
-    model = MaskedModel(args.model_name, idx2tag, tag2inputid, out_dim=out_dim).cuda()
-
-    # initialize dataloader
-    print('initializing data...')
-    train_dataloader = get_loader(args.train_file, tokenizer, args.batch_size, args.max_length, args.sample_num, tag2idx, tag_mapping)
-    val_dataloader = get_loader(args.val_file, tokenizer, args.val_batch_size, args.max_length, args.sample_num, tag2idx, tag_mapping)
-    test_dataloader = get_loader(args.test_file, tokenizer, args.val_batch_size, args.max_length, args.sample_num, tag2idx, tag_mapping)
-
-    Loss = nn.CrossEntropyLoss()
-    optimizer = AdamW(model.parameters(), lr=args.lr)
-    global_train_iter = int(args.epoch * len(train_dataloader) / args.grad_accum_step) + 1
-    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_step, num_training_steps=global_train_iter)
 
     # train
     print('######### start training ##########')
     epoch = args.epoch
     step = 0
-    for i in range(epoch):
-        print(f'---------epoch {i}---------')
-        model.train()
-        step_loss = []
-        step_acc = []
-        # result for each epoch
-        result_data = {}
-        epoch_acc = []
-        epoch_loss = []
-        epoch_val_acc = []
+    # logging
+    result_data = {}
+    # info every val step
+    step_acc = []
+    step_loss = []
+    step_val_acc = []
+    # infor every grad accum step
+    train_step_loss = []
+    train_step_acc = []
+    # best acc on val
+    best_acc = 0.0
 
-        for data in tqdm(train_dataloader):
-            to_cuda(data)
-            word_loss, tag_score = model(data)
-            loss = Loss(tag_score, data['tag_labels']) + word_loss
-            del word_loss
-            loss.backward()
-            step_loss.append(loss.item())
-
-            tag_pred = torch.argmax(tag_score, dim=1)
-            del tag_score
-            acc = accuracy_score(data['tag_labels'].cpu().numpy(), tag_pred.cpu().numpy())
-            step_acc.append(acc)
-
-            step += 1
-
-            if step % args.grad_accum_step == 0:
-                optimizer.step()
-                scheduler.step()
-                optimizer.zero_grad()
-                print()
-                print('[TRAIN STEP %d] loss: %.4f, accuracy: %.4f%%' % (step, np.mean(step_loss), np.mean(step_acc)*100))
-                print()
-
-                epoch_acc.append(np.mean(step_acc))
-                epoch_loss.append(np.mean(step_loss))
-
-                step_loss = []
-                step_acc = []
-                torch.cuda.empty_cache()
-
-        result_data['train_acc'] = np.mean(epoch_acc)
-        result_data['train_loss'] = np.mean(epoch_loss)
-
-        # validation
-        print('########### start validating ##########')
-        with torch.no_grad():
-            model.eval()
-            for data in tqdm(val_dataloader):
+    if not args.test_only:
+        for i in range(epoch):
+            print(f'---------epoch {i}---------')
+            model.train()
+            # result for each epoch
+            for data in train_dataloader:
                 to_cuda(data)
-                _, tag_score = model(data)
-                tag_pred = torch.argmax(tag_score, dim=1)
-                acc = accuracy_score(data['tag_labels'].cpu().numpy(), tag_pred.cpu().numpy())
-                epoch_val_acc.append(acc)
-            print('[EPOCH %d EVAL RESULT] accuracy: %.4f%%' % (i, np.mean(epoch_acc)*100))
-            result_data['val_acc'] = np.mean(epoch_val_acc)
-            torch.save(model, args.model_save_dir + f'/checkpoint-{i}')
-            print('checkpoint saved')
-            print()
+                tag_score = model(data)
+                loss = Loss(tag_score, data['labels'])
+                loss.backward()
 
-            # save training result
-            resultlog.update(i, result_data)
-            print('result log saved')
+                tag_pred = torch.argmax(tag_score, dim=1)
+                del tag_score
+                acc = accuracy_score(data['labels'].cpu().numpy(), tag_pred.cpu().numpy())
+
+                train_step_acc.append(acc)
+                train_step_loss.append(loss.item())
+                step_acc.append(acc)
+                step_loss.append(loss.item())
+
+                step += 1
+
+                if step % args.grad_accum_step == 0:
+                    optimizer.step()
+                    scheduler.step()
+                    optimizer.zero_grad()
+
+                    if step % (args.grad_accum_step*10) == 0:
+                        print('[TRAIN STEP %d] loss: %.4f, accuracy: %.4f%%' % (step, np.mean(train_step_loss), np.mean(train_step_acc)*100))
+                        train_step_loss = []
+                        train_step_acc = []
+                        torch.cuda.empty_cache()
+
+                # validation
+                if step % args.val_step == 0:
+                    print('########### start validating ##########')
+                    with torch.no_grad():
+                        model.eval()
+                        for data in tqdm(val_dataloader):
+                            to_cuda(data)
+                            tag_score = model(data)
+                            tag_pred = torch.argmax(tag_score, dim=1)
+                            acc = accuracy_score(data['labels'].cpu().numpy(), tag_pred.cpu().numpy())
+                            step_val_acc.append(acc)
+
+                        val_acc = np.mean(step_val_acc)
+                        print('[STEP %d EVAL RESULT] accuracy: %.4f%%' % (step, val_acc*100))
+
+                        if val_acc > best_acc:
+                            torch.save(model, MODEL_SAVE_PATH)
+                            print('Best checkpoint! checkpoint saved')
+                            best_acc = val_acc
+
+                        # save training result
+                        result_data['val_acc'] = val_acc
+                        result_data['train_acc'] = np.mean(step_acc)
+                        result_data['train_loss'] = np.mean(step_loss)
+                        resultlog.update(step, result_data)
+                        print('result log saved')
+                        # clear
+                        step_acc = []
+                        step_loss = []
+                        step_val_acc = []
+
+    # test
+    print('################# start testing #################')
+    model_dict = torch.load(MODEL_SAVE_PATH).state_dict()
+    load_info = model.load_state_dict(model_dict)
+    print(load_info)
+    y_true = []
+    y_pred = []
+    with torch.no_grad():
+        model.eval()
+        for data in tqdm(test_dataloader):
+            to_cuda(data)
+            tag_score = model(data)
+            tag_pred = torch.argmax(tag_score, dim=1)
+            y_pred += tag_pred.cpu().numpy().tolist()
+            y_true += data['labels'].cpu().numpy().tolist()
+        acc = accuracy_score(y_true, y_pred)
+        resultlog.update('test_acc', {'acc':acc})
+        print('[TEST RESULT] accuracy: %.4f%%' % (acc*100))
+
+
+    
 
 if __name__ == '__main__':
     main()
