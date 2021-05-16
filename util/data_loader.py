@@ -47,7 +47,7 @@ class EntityTypingDataset(data.Dataset):
             end = int(linelist[1])
             tag = linelist[3]
             # map tags
-            tag = self.tag_mapping[tag.lower()]
+            tag = self.tag_mapping[tag]
             label = self.tag2id[tag]
             words = linelist[2].split(' ')
             sample = Sample(words, tag, label, (start, end))
