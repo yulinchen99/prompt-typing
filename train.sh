@@ -1,5 +1,5 @@
 data='ontonote'
-highlight_entity='\<ENTITY\>-\</ENTITY\>'
+highlight_entity='<ENTITY>-</ENTITY>'
 # p-prompt
 prompt='[P]-[P1]-[P2]'
 # is-prompt
