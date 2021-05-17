@@ -7,7 +7,7 @@ from transformers import AutoConfig, RobertaConfig, BertConfig, RobertaForMasked
 import torch.nn.functional as F
 
 class EntityTypingModel(nn.Module):
-    def __init__(self, model_name, idx2tag, tag_list, prompt=None, is_p_prompt=True):
+    def __init__(self, model_name, idx2tag, tag_list, prompt=None, is_p_prompt=True, dropout=0.1):
         # prompt: a list of words
 
         nn.Module.__init__(self)
@@ -29,6 +29,7 @@ class EntityTypingModel(nn.Module):
         self.is_p_prompt = is_p_prompt
         if self.is_p_prompt:
             self.prompt_embedding = nn.Embedding(len(prompt), config.hidden_size)
+            self.prompt_linear = nn.Linear(config.hidden_size, config.hidden_size)
             self.model.resize_token_embeddings(config.vocab_size + len(prompt))
 
         self.model = nn.DataParallel(self.model)
@@ -86,7 +87,7 @@ class EntityTypingModel(nn.Module):
         if self.is_p_prompt:
             # embed prompt
             prompt_ids = torch.LongTensor([idx for idx, p in enumerate(self.prompt)]).cuda()
-            prompt_embedding = self.prompt_embedding(prompt_ids)
+            prompt_embedding = self.dropout(self.prompt_linear(self.prompt_embedding(prompt_ids)))
             # embed word
             output = self.tokenizer(inputs['words'], is_split_into_words=True, return_attention_mask=True, return_tensors='pt', padding=True)
             word_embedding = self.word_embedding(output['input_ids'].cuda())

@@ -54,6 +54,8 @@ def main():
     parser.add_argument('--highlight_entity', type=str, default=None, help='for baseline model, highlight tokens around entity')
     parser.add_argument('--test_only', action='store_true', default=False)
     parser.add_argument('--dual_optim', action='store_true', default=False, help='set True if separate learning rate in maskedlm p-prompt setting is desired')
+    parser.add_argument('--dropout', type=float, default=0.1)
+
 
 
     args = parser.parse_args()
@@ -66,6 +68,8 @@ def main():
     # model saving path
     data = args.data.split('/')[-1]
     MODEL_SAVE_PATH = os.path.join(args.save_dir, f'{args.model}-{args.model_name}-{data}-{args.prompt}-seed_{args.seed}')
+    if args.dual_optim and args.model == 'maskedlm':
+        MODEL_SAVE_PATH += '-dual_optim'
     if not os.path.exists(args.save_dir):
         os.mkdir(args.save_dir)
     args.model_save_path = MODEL_SAVE_PATH
@@ -102,7 +106,7 @@ def main():
     if args.model == 'baseline':
         model = BaselineModel(args.model_name, idx2tag, mapped_tag_list, out_dim, highlight_entity=HIGHLIGHT_ENTITY)
     elif args.model == 'maskedlm':
-        model = MaskedLM(args.model_name, idx2tag, mapped_tag_list, prompt=PROMPT, is_p_prompt=IS_P_PROMPT)
+        model = MaskedLM(args.model_name, idx2tag, mapped_tag_list, prompt=PROMPT, is_p_prompt=IS_P_PROMPT, dropout=args.dropout)
     else:
         raise NotImplementedError
     model = model.cuda()
@@ -115,8 +119,8 @@ def main():
 
     Loss = nn.CrossEntropyLoss()
     if args.dual_optim:
-        print(f'using dual optim, embed_lr: {args.embed:lr}, lr:{args.lr}')
-        bert_param = [p for p in model.parameters() if id(p) not in list(map(id, model.prompt_embedding.parameters()))]
+        print(f'using dual optim, embed_lr: {args.embed_lr}, lr:{args.lr}')
+        bert_param = [p for p in model.parameters() if id(p) not in list(map(id, model.prompt_embedding.parameters())) + list(map(id, model.prompt_linear.parameters()))]
         optimizer = AdamW([
                 {'params': bert_param},
                 {'params': model.prompt_embedding.parameters(), 'lr': args.embed_lr}
