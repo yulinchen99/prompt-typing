@@ -12,15 +12,14 @@ class EntityTypingModel(nn.Module):
 
         nn.Module.__init__(self)
         config = AutoConfig.from_pretrained(model_name)
-        self.word_embedding = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx=config.pad_token_id)
         if isinstance(config, RobertaConfig):
             self.model = RobertaForMaskedLM.from_pretrained(model_name)
             self.tokenizer = RobertaTokenizer.from_pretrained(model_name)
-            self.word_embedding.weight = self.model.roberta.embeddings.word_embeddings.weight
+            self.word_embedding = self.model.roberta.get_input_embeddings()
         elif isinstance(config, BertConfig):
             self.model = BertForMaskedLM.from_pretrained(model_name)
             self.tokenizer = BertTokenizer.from_pretrained(model_name)
-            self.word_embedding.weight = self.model.bert.embeddings.word_embeddings.weight
+            self.word_embedding = self.model.bert.get_input_embeddings()
         else:
             print('unsupported model name')
         self.prompt = prompt
@@ -30,6 +29,7 @@ class EntityTypingModel(nn.Module):
         if self.is_p_prompt:
             self.prompt_embedding = nn.Embedding(len(prompt), config.hidden_size)
             self.prompt_linear = nn.Linear(config.hidden_size, config.hidden_size)
+            self.dropout = nn.Dropout(dropout)
             self.model.resize_token_embeddings(config.vocab_size + len(prompt))
 
         self.model = nn.DataParallel(self.model)
