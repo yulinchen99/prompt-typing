@@ -99,7 +99,7 @@ class EntityTypingModel(nn.Module):
             input_words = []
             for i, words in enumerate(inputs['words']):
                 pos = inputs['entity_pos'][i]
-                input_words.append(words + words[pos[0]:pos[1]] + self.prompt + ['[MASK]'])
+                input_words.append(words + words[pos[0]:pos[1]] + self.prompt + [self.tokenizer.mask_token])
             inputs = self.tokenizer(input_words, is_split_into_words=True, return_tensors='pt', padding=True)
             all_mask = inputs['attention_mask'].cuda()
             tag_output = self.model(input_ids=inputs['input_ids'].cuda(), attention_mask=inputs['attention_mask'].cuda(), output_hidden_states=True)
