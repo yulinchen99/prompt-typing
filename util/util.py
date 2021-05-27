@@ -2,6 +2,7 @@ import pandas as pd
 import os
 import json
 from transformers import AutoConfig, RobertaConfig, BertConfig, RobertaTokenizer, BertTokenizer
+import torch.nn as nn
 
 def load_tag_mapping(datadir):
     filepath = os.path.join(datadir, 'tag_mapping.txt')
@@ -74,7 +75,24 @@ class ResultLog:
     def delete(self):
         os.remove(self.save_path)
 
-
+class PartialLabelLoss(nn.Module):
+    def __init__(self):
+        nn.Module.__init__(self)
+        self.logsoftmax = nn.LogSoftmax()
     
-
-    
+    def forward(self, score, label):
+        assert score.size(0) == label.size(0)
+        score = score.float()
+        score = self.logsoftmax(score)
+        loss = 0.0
+        for i in range(label.size(0)):
+            loss -= score[i][label[i]]
+        loss = loss / label.size(0)
+        return loss
+'''
+import torch
+score = torch.LongTensor([[1.0,2.0,3.0],[1.0,2.0,3.0],[1.0,2.0,3.0]])
+label = torch.LongTensor([0,1,2])
+loss = PartialLabelLoss()
+print(loss(score, label))
+'''

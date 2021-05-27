@@ -3,7 +3,7 @@ from transformers import BertConfig, RobertaConfig
 from util.data_loader import get_loader
 from model.baseline import EntityTypingModel as BaselineModel
 from model.maskedlm import EntityTypingModel as MaskedLM
-from util.util import load_tag_mapping, get_tag2inputid, get_mapped_tag_list, ResultLog, get_tokenizer
+from util.util import load_tag_mapping, get_tag2inputid, get_mapped_tag_list, ResultLog, get_tokenizer, PartialLabelLoss
 import torch.nn as nn
 from torch.optim import AdamW, lr_scheduler
 from sklearn.metrics import accuracy_score
@@ -15,6 +15,7 @@ import warnings
 from transformers import get_linear_schedule_with_warmup
 import os
 import datetime
+from util.metrics import get_metrics
 #from memory_profiler import profile
 
 warnings.filterwarnings('ignore')
@@ -50,12 +51,18 @@ def main():
     parser.add_argument('--warmup_step', type=int, default=100)
     parser.add_argument('--val_step', type=int, default=2000, help='val every x steps of training')
     parser.add_argument('--save_dir', type=str, default='checkpoint')
-    parser.add_argument('--prompt', type=str, default='[P]-[P1]-[P2]')
-    parser.add_argument('--highlight_entity', type=str, default=None, help='for baseline model, highlight tokens around entity')
     parser.add_argument('--test_only', action='store_true', default=False)
+    parser.add_argument('--load_ckpt', type=str, default=None)
+
+    # for soft prompt only
+    parser.add_argument('--prompt', type=str, default='[P]-[P1]-[P2]')
     parser.add_argument('--dual_optim', action='store_true', default=False, help='set True if separate learning rate in maskedlm p-prompt setting is desired')
     parser.add_argument('--dropout', type=float, default=0.1)
 
+    # for baseline only
+    parser.add_argument('--usecls', action='store_true', default=False)
+    parser.add_argument('--highlight_entity', type=str, default=None, help='for baseline model, highlight tokens around entity')
+    parser.add_argument('--loss', type=str, default='cross', help='cross or partial')
 
 
     args = parser.parse_args()
@@ -68,6 +75,7 @@ def main():
     # model saving path
     data = args.data.split('/')[-1]
     MODEL_SAVE_PATH = os.path.join(args.save_dir, f'{args.model}-{args.model_name}-{data}-{args.prompt}-seed_{args.seed}')
+
     if args.dual_optim and args.model == 'maskedlm':
         MODEL_SAVE_PATH += '-dual_optim'
     if not os.path.exists(args.save_dir):
@@ -102,9 +110,8 @@ def main():
 
     # initialize model
     print('initializing model...')
-    tokenizer = get_tokenizer(args.model_name)
     if args.model == 'baseline':
-        model = BaselineModel(args.model_name, idx2tag, mapped_tag_list, out_dim, highlight_entity=HIGHLIGHT_ENTITY)
+        model = BaselineModel(args.model_name, idx2tag, mapped_tag_list, out_dim, highlight_entity=HIGHLIGHT_ENTITY, dropout=args.dropout, usecls=args.usecls)
     elif args.model == 'maskedlm':
         model = MaskedLM(args.model_name, idx2tag, mapped_tag_list, prompt=PROMPT, is_p_prompt=IS_P_PROMPT, dropout=args.dropout)
     else:
@@ -117,7 +124,15 @@ def main():
     val_dataloader = get_loader(args.data, 'dev', args.val_batch_size, args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
     test_dataloader = get_loader(args.data, 'test', args.val_batch_size, args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
 
-    Loss = nn.CrossEntropyLoss()
+    # initialize loss
+    if args.loss == 'cross':
+        Loss = nn.CrossEntropyLoss()
+    elif args.loss == 'partial':
+        Loss = PartialLabelLoss()
+    else:
+        assert False, print(f'invalid loss {args.loss}!')
+
+    # initialize optimizer
     if args.dual_optim:
         print(f'using dual optim, embed_lr: {args.embed_lr}, lr:{args.lr}')
         bert_param = [p for p in model.parameters() if id(p) not in list(map(id, model.prompt_embedding.parameters())) + list(map(id, model.prompt_linear.parameters()))]
@@ -147,7 +162,7 @@ def main():
     # info every val step
     step_acc = []
     step_loss = []
-    step_val_acc = []
+    #step_val_acc = []
     # infor every grad accum step
     train_step_loss = []
     train_step_acc = []
@@ -155,6 +170,12 @@ def main():
     best_acc = 0.0
 
     if not args.test_only:
+        if args.load_ckpt is not None:
+            print(f'loading pre-trained ckpt {args.load_ckpt}...')
+            load_path =  args.load_ckpt
+            model_dict = torch.load(load_path).state_dict()
+            load_info = model.load_state_dict(model_dict)
+            print(load_info)
         for i in range(epoch):
             print(f'---------epoch {i}---------')
             model.train()
@@ -192,15 +213,21 @@ def main():
                     print('########### start validating ##########')
                     with torch.no_grad():
                         model.eval()
+                        y_true = []
+                        y_pred = []
                         for data in tqdm(val_dataloader):
                             to_cuda(data)
                             tag_score = model(data)
                             tag_pred = torch.argmax(tag_score, dim=1)
-                            acc = accuracy_score(data['labels'].cpu().numpy(), tag_pred.cpu().numpy())
-                            step_val_acc.append(acc)
+                            y_pred += tag_pred.cpu().numpy().tolist()
+                            y_true += data['labels'].cpu().numpy().tolist()
+                            #acc = accuracy_score(data['labels'].cpu().numpy(), tag_pred.cpu().numpy())
+                            #step_val_acc.append(acc)
 
-                        val_acc = np.mean(step_val_acc)
-                        print('[STEP %d EVAL RESULT] accuracy: %.4f%%' % (step, val_acc*100))
+                        #val_acc = np.mean(step_val_acc)
+                        val_acc, val_micro, val_macro = get_metrics(y_true, y_pred)
+                        print('[STEP %d EVAL RESULT] accuracy: %.4f%%, micro-f:%.4f%%,\
+                            macro-f:%.4f%%' % (step, val_acc*100, val_micro*100, val_macro*100))
 
                         if val_acc > best_acc:
                             torch.save(model, MODEL_SAVE_PATH)
@@ -209,6 +236,8 @@ def main():
 
                         # save training result
                         result_data['val_acc'] = val_acc
+                        result_data['val_micro'] = val_micro
+                        result_data['val_macro'] = val_macro
                         result_data['train_acc'] = np.mean(step_acc)
                         result_data['train_loss'] = np.mean(step_loss)
                         resultlog.update(step, result_data)
@@ -216,11 +245,18 @@ def main():
                         # clear
                         step_acc = []
                         step_loss = []
-                        step_val_acc = []
+                        #step_val_acc = []
+
+                    # reset model to train mode
+                    model.train()
 
     # test
     print('################# start testing #################')
-    model_dict = torch.load(MODEL_SAVE_PATH).state_dict()
+    if args.load_ckpt is not None:
+        load_path =  args.load_ckpt
+    else:
+        load_path = MODEL_SAVE_PATH
+    model_dict = torch.load(load_path).state_dict()
     load_info = model.load_state_dict(model_dict)
     print(load_info)
     y_true = []
@@ -233,9 +269,10 @@ def main():
             tag_pred = torch.argmax(tag_score, dim=1)
             y_pred += tag_pred.cpu().numpy().tolist()
             y_true += data['labels'].cpu().numpy().tolist()
-        acc = accuracy_score(y_true, y_pred)
-        resultlog.update('test_acc', {'acc':acc})
-        print('[TEST RESULT] accuracy: %.4f%%' % (acc*100))
+        #acc = accuracy_score(y_true, y_pred)
+        acc, micro, macro = get_metrics(y_true, y_pred, isfewnerd=args.data=='fewnerd')
+        resultlog.update('test_acc', {'acc':acc, 'micro':micro, 'macro':macro})
+        print('[TEST RESULT] accuracy: %.4f%%, micro-f:%.4f%%, macro-f:%.4f%%' % (acc*100, micro*100, macro*100))
 
 
     
