@@ -5,7 +5,7 @@ def f1(p, r):
 
 def label_path(t, isfewnerd=False):
     if isfewnerd:
-        return t.split('-')
+        return [t.split('-')[0], t]
     else:
         types = t.split("/")
         if len(types) == 3:
@@ -62,6 +62,6 @@ def get_metrics(label, pred, idx2tag, isfewnerd=False):
     acc = strict(label, pred)
     macro = loose_macro(label, pred)
     micro = loose_micro(label, pred)
-    return acc, micro, macro
+    return acc, {'p':micro[0], 'r':micro[1], 'f':micro[2]}, {'p':macro[0], 'r':macro[1], 'f':macro[2]}
 
 

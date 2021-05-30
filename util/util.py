@@ -10,14 +10,16 @@ def load_tag_mapping(datadir):
     tag_mapping = dict(zip(list(df[0]), list(df[1])))
     return tag_mapping
 
-def get_mapped_tag_list(datadir, tag_mapping):
+def get_tag_list(datadir, tag_mapping):
     filepath = os.path.join(datadir, 'tags.txt')
     mapped_tag_list = []
+    ori_tag_list = []
     with open(filepath, 'r', encoding='utf-8')as f:
         lines = f.readlines()
         for line in lines:
+            ori_tag_list.append(line.strip())
             mapped_tag_list.append(tag_mapping[line.strip()])
-    return mapped_tag_list
+    return ori_tag_list, mapped_tag_list
 
 def get_tag2inputid(tokenizer, mapped_tag_list):
     splitted_tags = [list(set(tag.split('/'))) for tag in mapped_tag_list]

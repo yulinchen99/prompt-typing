@@ -106,5 +106,6 @@ class EntityTypingModel(nn.Module):
             tag_output = self.model(input_ids=inputs['input_ids'].cuda(), attention_mask=inputs['attention_mask'].cuda(), output_hidden_states=True)
         
         tag_score = self.__get_tag_score__(tag_output, all_mask)
+        tag_score = self.__get_tag_logits__(tag_score)
         return tag_score
 # %%

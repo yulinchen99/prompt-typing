@@ -3,7 +3,7 @@ from transformers import BertConfig, RobertaConfig
 from util.data_loader import get_loader
 from model.baseline import EntityTypingModel as BaselineModel
 from model.maskedlm import EntityTypingModel as MaskedLM
-from util.util import load_tag_mapping, get_tag2inputid, get_mapped_tag_list, ResultLog, get_tokenizer, PartialLabelLoss
+from util.util import load_tag_mapping, get_tag2inputid, get_tag_list, ResultLog, get_tokenizer, PartialLabelLoss
 import torch.nn as nn
 from torch.optim import AdamW, lr_scheduler
 from sklearn.metrics import accuracy_score
@@ -70,6 +70,9 @@ def main():
     set_seed(args.seed)
 
     # data path
+    IS_FEWNERD=args.data=='fewnerd'
+    if IS_FEWNERD:
+        print('is fewnerd')
     args.data = os.path.join('data', args.data)
 
     # model saving path
@@ -102,11 +105,14 @@ def main():
     # get tag list
     print('get tag list...')
     tag_mapping = load_tag_mapping(args.data)
-    mapped_tag_list = get_mapped_tag_list(args.data, tag_mapping)
+    ori_tag_list, mapped_tag_list = get_tag_list(args.data, tag_mapping)
     out_dim = len(mapped_tag_list)
     tag2idx = {tag:idx for idx, tag in enumerate(mapped_tag_list)}
     idx2tag = {idx:tag for idx, tag in enumerate(mapped_tag_list)}
     print(tag2idx)
+    # for metrics calculation only
+    idx2oritag = {idx:tag for idx, tag in enumerate(ori_tag_list)}
+    print(idx2oritag)
 
     # initialize model
     print('initializing model...')
@@ -225,9 +231,9 @@ def main():
                             #step_val_acc.append(acc)
 
                         #val_acc = np.mean(step_val_acc)
-                        val_acc, val_micro, val_macro = get_metrics(y_true, y_pred)
-                        print('[STEP %d EVAL RESULT] accuracy: %.4f%%, micro-f:%.4f%%,\
-                            macro-f:%.4f%%' % (step, val_acc*100, val_micro*100, val_macro*100))
+                        val_acc, val_micro, val_macro = get_metrics(y_true, y_pred, idx2oritag, isfewnerd=IS_FEWNERD)
+                        print('[STEP %d EVAL RESULT] accuracy: %.4f%%, micro:%s, \
+                            macro:%s' % (step, val_acc*100, str(val_micro), str(val_macro)))
 
                         if val_acc > best_acc:
                             torch.save(model, MODEL_SAVE_PATH)
@@ -270,9 +276,9 @@ def main():
             y_pred += tag_pred.cpu().numpy().tolist()
             y_true += data['labels'].cpu().numpy().tolist()
         #acc = accuracy_score(y_true, y_pred)
-        acc, micro, macro = get_metrics(y_true, y_pred, isfewnerd=args.data=='fewnerd')
+        acc, micro, macro = get_metrics(y_true, y_pred, idx2oritag, isfewnerd=IS_FEWNERD)
         resultlog.update('test_acc', {'acc':acc, 'micro':micro, 'macro':macro})
-        print('[TEST RESULT] accuracy: %.4f%%, micro-f:%.4f%%, macro-f:%.4f%%' % (acc*100, micro*100, macro*100))
+        print('[TEST RESULT] accuracy: %.4f%%, micro:%s, macro:%s' % (acc*100, str(micro), str(macro)))
 
 
     
