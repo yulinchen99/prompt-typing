@@ -35,8 +35,8 @@ def loose_macro(labels, predictions):
     p /= len(labels)
     r /= len(labels)
     f = f1(p, r)
-    print("Loose Macro:")
-    print("Precision %s Recall %s F1 %s" % (p, r, f))
+    #print("Loose Macro:")
+    #print("Precision %s Recall %s F1 %s" % (p, r, f))
     return p, r, f
 
 def loose_micro(labels, predictions):
@@ -52,8 +52,8 @@ def loose_micro(labels, predictions):
     p = cnt_correct/cnt_pred
     r = cnt_correct/cnt_label
     f = f1(p, r)
-    print("Loose Micro:")
-    print("Precision %s Recall %s F1 %s" % (p, r, f))
+    #print("Loose Micro:")
+    #print("Precision %s Recall %s F1 %s" % (p, r, f))
     return p, r, f
 
 def get_metrics(label, pred, idx2tag, isfewnerd=False):

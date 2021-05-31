@@ -194,7 +194,7 @@ def main():
 
                 tag_pred = torch.argmax(tag_score, dim=1)
                 del tag_score
-                acc = accuracy_score(data['labels'].cpu().numpy(), tag_pred.cpu().numpy())
+                acc, _, _ = get_metrics(data['labels'].cpu().numpy().tolist(), tag_pred.cpu().numpy().tolist(), idx2oritag, isfewnerd=IS_FEWNERD)
 
                 train_step_acc.append(acc)
                 train_step_loss.append(loss.item())
