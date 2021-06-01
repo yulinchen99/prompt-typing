@@ -19,7 +19,7 @@ def strict(labels, predictions):
     for label, pred in zip(labels, predictions):
         cnt += set(label) == set(pred)
     acc = cnt/len(labels)
-    print("Strict Accuracy: %s" % acc)
+    #print("Strict Accuracy: %s" % acc)
     return acc
 
 def loose_macro(labels, predictions):
