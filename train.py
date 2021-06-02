@@ -53,9 +53,11 @@ def main():
     parser.add_argument('--save_dir', type=str, default='checkpoint')
     parser.add_argument('--test_only', action='store_true', default=False)
     parser.add_argument('--load_ckpt', type=str, default=None)
+    parser.add_argument('--ckpt_name', type=str, default=None)
+
 
     # for soft prompt only
-    parser.add_argument('--prompt', type=str, default='[P]-[P1]-[P2]')
+    parser.add_argument('--prompt', type=str, default='soft', help='soft or hard')
     parser.add_argument('--dual_optim', action='store_true', default=False, help='set True if separate learning rate in maskedlm p-prompt setting is desired')
     parser.add_argument('--dropout', type=float, default=0.1)
 
@@ -78,22 +80,18 @@ def main():
     # model saving path
     data = args.data.split('/')[-1]
     MODEL_SAVE_PATH = os.path.join(args.save_dir, f'{args.model}-{args.model_name}-{data}-{args.prompt}-seed_{args.seed}')
+    if args.ckpt_name:
+        MODEL_SAVE_PATH += '_' + args.ckpt_name
 
-    if args.dual_optim and args.model == 'maskedlm':
-        MODEL_SAVE_PATH += '-dual_optim'
+    # if args.dual_optim and args.model == 'maskedlm':
+        # MODEL_SAVE_PATH += '-dual_optim'
     if not os.path.exists(args.save_dir):
         os.mkdir(args.save_dir)
     args.model_save_path = MODEL_SAVE_PATH
     print('modelsave path:', MODEL_SAVE_PATH)
     
     # prompt
-    PROMPT = None
-    IS_P_PROMPT = False
     HIGHLIGHT_ENTITY = None
-    if args.prompt:
-        PROMPT = args.prompt.split('-')
-    if '[P]' in PROMPT:
-        IS_P_PROMPT = True
     if args.highlight_entity is not None:
         HIGHLIGHT_ENTITY = args.highlight_entity.split('-')
 
@@ -119,7 +117,7 @@ def main():
     if args.model == 'baseline':
         model = BaselineModel(args.model_name, idx2tag, mapped_tag_list, out_dim, highlight_entity=HIGHLIGHT_ENTITY, dropout=args.dropout, usecls=args.usecls)
     elif args.model == 'maskedlm':
-        model = MaskedLM(args.model_name, idx2tag, mapped_tag_list, prompt=PROMPT, is_p_prompt=IS_P_PROMPT, dropout=args.dropout)
+        model = MaskedLM(args.model_name, idx2tag, mapped_tag_list, prompt_mode=args.prompt)
     else:
         raise NotImplementedError
     model = model.cuda()

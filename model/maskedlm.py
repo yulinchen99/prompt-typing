@@ -6,8 +6,33 @@ import torch.nn as nn
 from transformers import AutoConfig, RobertaConfig, BertConfig, RobertaForMaskedLM, BertForMaskedLM, RobertaTokenizer, BertTokenizer
 import torch.nn.functional as F
 
+class Prompt:
+    def __init__(self):
+        # each prompt is [separation_token, prompt_word1, prompt_word2, ...]
+        self.prompt_dict = {
+            'soft':['[P1]','[P2]'],
+            'hard':['is']
+        }
+        self.sep_dict = {
+            'soft': ['[P]'],
+            'hard': []
+        }
+        self.prompt = None
+
+    def get_tokens(self, prompt_mode):
+        if prompt_mode not in self.prompt_dict:
+            print(f'no prompt for mode {prompt_mode}')
+            raise ValueError
+        else:
+            return self.sep_dict[prompt_mode] + self.prompt_dict[prompt_mode]
+    
+    def get_prompt_sentence(self, words, pos, prompt_mode):
+        prompt = self.prompt_dict[prompt_mode]
+        sep = self.sep_dict[prompt_mode]
+        return words + sep + words[pos[0]:pos[1]] + prompt
+
 class EntityTypingModel(nn.Module):
-    def __init__(self, model_name, idx2tag, tag_list, prompt=None, is_p_prompt=True, dropout=0.1):
+    def __init__(self, model_name, idx2tag, tag_list, prompt_mode):
         # prompt: a list of words
 
         nn.Module.__init__(self)
@@ -15,22 +40,29 @@ class EntityTypingModel(nn.Module):
         if isinstance(config, RobertaConfig):
             self.model = RobertaForMaskedLM.from_pretrained(model_name)
             self.tokenizer = RobertaTokenizer.from_pretrained(model_name)
-            self.word_embedding = self.model.roberta.get_input_embeddings()
+            #self.word_embedding = self.model.roberta.get_input_embeddings()
         elif isinstance(config, BertConfig):
             self.model = BertForMaskedLM.from_pretrained(model_name)
             self.tokenizer = BertTokenizer.from_pretrained(model_name)
-            self.word_embedding = self.model.bert.get_input_embeddings()
+            #self.word_embedding = self.model.bert.get_input_embeddings()
         else:
             print('unsupported model name')
-        self.prompt = prompt
-
+        
+        # handle new tokens in prompt
+        self.prompt = Prompt()
+        self.prompt_mode = prompt_mode
+        new_tokens = self.prompt.get_tokens(prompt_mode)
+        num_added_tokens = self.tokenizer.add_tokens(new_tokens)
+        self.model.resize_token_embeddings(config.vocab_size + num_added_tokens)
+        
         # whether [P]-[P1]-[P2] prompt or 'is' prompt
+        '''
         self.is_p_prompt = is_p_prompt
         if self.is_p_prompt:
             self.prompt_embedding = nn.Embedding(len(prompt), config.hidden_size)
             self.prompt_linear = nn.Linear(config.hidden_size, config.hidden_size)
             self.dropout = nn.Dropout(dropout)
-            self.model.resize_token_embeddings(config.vocab_size + len(prompt))
+        '''
 
         self.model = nn.DataParallel(self.model)
         self.idx2tag = idx2tag
@@ -84,26 +116,15 @@ class EntityTypingModel(nn.Module):
 
 
     def forward(self, inputs):
-        if self.is_p_prompt:
-            # embed prompt
-            prompt_ids = torch.LongTensor([idx for idx, p in enumerate(self.prompt)]).cuda()
-            prompt_embedding = self.dropout(self.prompt_linear(self.prompt_embedding(prompt_ids)))
-            # embed word
-            output = self.tokenizer(inputs['words'], is_split_into_words=True, return_attention_mask=True, return_tensors='pt', padding=True)
-            word_embedding = self.word_embedding(output['input_ids'].cuda())
-            # embed mask
-            mask_embedding = self.word_embedding((torch.LongTensor([self.tokenizer.mask_token_id]).cuda()))
-            # concat
-            all_embedding, all_mask = self.concat_word_prompt_embedding(word_embedding, prompt_embedding, mask_embedding, output['attention_mask'].cuda(), inputs)
-            tag_output = self.model(inputs_embeds=all_embedding, attention_mask=all_mask, output_hidden_states=True)
-        else:
-            input_words = []
-            for i, words in enumerate(inputs['words']):
-                pos = inputs['entity_pos'][i]
-                input_words.append(words + words[pos[0]:pos[1]] + self.prompt + [self.tokenizer.mask_token])
-            inputs = self.tokenizer(input_words, is_split_into_words=True, return_tensors='pt', padding=True)
-            all_mask = inputs['attention_mask'].cuda()
-            tag_output = self.model(input_ids=inputs['input_ids'].cuda(), attention_mask=inputs['attention_mask'].cuda(), output_hidden_states=True)
+        input_words = []
+        for i, words in enumerate(inputs['words']):
+            pos = inputs['entity_pos'][i]
+            newwords = self.prompt.get_prompt_sentence(words, pos, self.prompt_mode)
+            newwords += [self.tokenizer.mask_token]
+            input_words.append(newwords)
+        inputs = self.tokenizer(input_words, is_split_into_words=True, return_tensors='pt', padding=True)
+        all_mask = inputs['attention_mask'].cuda()
+        tag_output = self.model(input_ids=inputs['input_ids'].cuda(), attention_mask=inputs['attention_mask'].cuda(), output_hidden_states=True)
         
         tag_score = self.__get_tag_score__(tag_output, all_mask)
         tag_score = self.__get_tag_logits__(tag_score)
