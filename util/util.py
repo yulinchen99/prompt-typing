@@ -23,9 +23,18 @@ def get_tag_list(datadir, tag_mapping):
 
 def get_tag2inputid(tokenizer, mapped_tag_list):
     splitted_tags = [list(set(tag.split('/'))) for tag in mapped_tag_list]
+
+    # tokenize
+    tokenized_tags = []
+    for splitted_tag in splitted_tags:
+        tokenized_tag = []
+        for tag in splitted_tag:
+            tokenized_tag.append(tokenizer.tokenize(tag)[0]) # get the first token
+        tokenized_tags.append(tokenized_tag) 
+
     d ={}
-    for i, splitted_tag in enumerate(splitted_tags):
-        d[mapped_tag_list[i]] = tokenizer.convert_tokens_to_ids(splitted_tag)
+    for i, tokenized_tag in enumerate(tokenized_tags):
+        d[mapped_tag_list[i]] = tokenizer.convert_tokens_to_ids(tokenized_tag)
     return d
 
 def get_tokenizer(model_name):
