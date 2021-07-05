@@ -3,7 +3,7 @@ sys.path.append('../')
 from util.util import get_tag2inputid
 import torch
 import torch.nn as nn
-from transformers import AutoConfig, RobertaConfig, BertConfig, RobertaForMaskedLM, BertForMaskedLM, RobertaTokenizer, BertTokenizer
+from transformers import AutoConfig, RobertaConfig, BertConfig, RobertaForMaskedLM, BertForMaskedLM, RobertaTokenizer, BertTokenizer, GPT2Config, GPT2Tokenizer, GPT2LMHeadModel
 import torch.nn.functional as F
 
 class Prompt:
@@ -45,8 +45,12 @@ class EntityTypingModel(nn.Module):
             self.model = BertForMaskedLM.from_pretrained(model_name)
             self.tokenizer = BertTokenizer.from_pretrained(model_name)
             #self.word_embedding = self.model.bert.get_input_embeddings()
+        elif isinstance(config, GPT2Config):
+            self.model = GPT2LMHeadModel.from_pretrained(model_name)
+            self.tokenizer = GPT2Tokenizer.from_pretrained(model_name)
         else:
             print('unsupported model name')
+            raise ValueError
         
         # handle new tokens in prompt
         self.prompt = Prompt()
@@ -54,15 +58,6 @@ class EntityTypingModel(nn.Module):
         new_tokens = self.prompt.get_tokens(prompt_mode)
         num_added_tokens = self.tokenizer.add_tokens(new_tokens)
         self.model.resize_token_embeddings(config.vocab_size + num_added_tokens)
-        
-        # whether [P]-[P1]-[P2] prompt or 'is' prompt
-        '''
-        self.is_p_prompt = is_p_prompt
-        if self.is_p_prompt:
-            self.prompt_embedding = nn.Embedding(len(prompt), config.hidden_size)
-            self.prompt_linear = nn.Linear(config.hidden_size, config.hidden_size)
-            self.dropout = nn.Dropout(dropout)
-        '''
 
         self.model = nn.DataParallel(self.model)
         self.idx2tag = idx2tag
@@ -75,12 +70,19 @@ class EntityTypingModel(nn.Module):
         return torch.cat(tag_logits, dim=-1) # (batch_num, tag_num)
 
     def __get_tag_score__(self, output, mask):
-        out_score = output.logits
-        # get score at position [MASK]
-        tag_score = []
-        for idx, score in enumerate(out_score):
-            tag_score.append(score[mask[idx]==1][-2].unsqueeze(0))
-        tag_score = torch.cat(tag_score, dim=0)
+        if not isinstance(self.tokenizer, GPT2Tokenizer):
+            out_score = output.logits
+            # get score at position [MASK]
+            tag_score = []
+            for idx, score in enumerate(out_score):
+                tag_score.append(score[mask[idx]==1][-2].unsqueeze(0))
+            tag_score = torch.cat(tag_score, dim=0)
+        else:
+            out_score = output.logits
+            tag_score = []
+            for idx, score in enumerate(out_score):
+                tag_score.append(score[mask[idx]==1][-1].unsqueeze(0))
+            tag_score = torch.cat(tag_score, dim=0)
         return tag_score
 
     def concat_word_prompt_embedding(self, word_embed, prompt_embed, mask_embed, word_attention_mask, inputs):
@@ -120,11 +122,19 @@ class EntityTypingModel(nn.Module):
         for i, words in enumerate(inputs['words']):
             pos = inputs['entity_pos'][i]
             newwords = self.prompt.get_prompt_sentence(words, pos, self.prompt_mode)
-            newwords += [self.tokenizer.mask_token]
+            if not isinstance(self.tokenizer, GPT2Tokenizer):
+                newwords += [self.tokenizer.mask_token]
             input_words.append(newwords)
+        if isinstance(self.tokenizer, GPT2Tokenizer):
+            self.tokenizer.pad_token = self.tokenizer.eos_token
         inputs = self.tokenizer(input_words, is_split_into_words=True, return_tensors='pt', padding=True)
         all_mask = inputs['attention_mask'].cuda()
-        tag_output = self.model(input_ids=inputs['input_ids'].cuda(), attention_mask=inputs['attention_mask'].cuda(), output_hidden_states=True)
+        #try:
+        tag_output = self.model(input_ids=inputs['input_ids'].cuda(), attention_mask=all_mask, output_hidden_states=True)
+        #except:
+            #print(inputs['input_ids'].shape)
+            #print(inputs['attention_mask'].shape)
+
         
         tag_score = self.__get_tag_score__(tag_output, all_mask)
         tag_score = self.__get_tag_logits__(tag_score)

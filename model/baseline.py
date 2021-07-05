@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from transformers import AutoConfig, RobertaConfig, BertConfig, RobertaModel, BertModel, RobertaTokenizer, BertTokenizer
+from transformers import AutoConfig, RobertaConfig, BertConfig, RobertaModel, BertModel, RobertaTokenizer, BertTokenizer, GPT2Config, GPT2Tokenizer, GPT2LMHeadModel
 import sys
 sys.path.append('../')
 from util.util import get_tag2inputid
@@ -16,8 +16,12 @@ class EntityTypingModel(nn.Module):
         elif isinstance(config, BertConfig):
             self.model = BertModel(config).from_pretrained(model_name)
             self.tokenizer = BertTokenizer.from_pretrained(model_name)
+        elif isinstance(config, GPT2Config):
+            self.model = GPT2LMHeadModel.from_pretrained(model_name)
+            self.tokenizer = GPT2Tokenizer.from_pretrained(model_name)
         else:
             print('unsupported model name')
+            raise ValueError
         if highlight_entity:
             added_num = self.tokenizer.add_tokens(highlight_entity)
             self.model.resize_token_embeddings(config.vocab_size+added_num)

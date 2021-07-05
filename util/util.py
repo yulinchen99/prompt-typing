@@ -1,7 +1,7 @@
 import pandas as pd
 import os
 import json
-from transformers import AutoConfig, RobertaConfig, BertConfig, RobertaTokenizer, BertTokenizer
+from transformers import AutoConfig, RobertaConfig, BertConfig, RobertaTokenizer, BertTokenizer, GPT2Config, GPT2Tokenizer
 import torch.nn as nn
 
 def load_tag_mapping(datadir):
@@ -44,8 +44,11 @@ def get_tokenizer(model_name):
         tokenizer = RobertaTokenizer.from_pretrained(model_name)
     elif isinstance(config, BertConfig):
         tokenizer = BertTokenizer.from_pretrained(model_name)
+    elif isinstance(config, GPT2Config):
+        tokenizer = GPT2Tokenizer.from_pretrained(model_name)
     else:
         print('unsupported model name')
+        raise ValueError
     return tokenizer
 
 class ResultLog:

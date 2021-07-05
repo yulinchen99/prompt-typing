@@ -3,7 +3,6 @@ import torch
 import torch.utils.data as data
 import os
 import numpy as np
-from transformers import BertTokenizer, AutoConfig, RobertaConfig, BertConfig, RobertaTokenizer
 # from word_encoder import BERTWordEncoder
 
 class Sample:
@@ -84,6 +83,6 @@ def get_loader(datadir, mode, batch_size, max_length, tag2idx, tag_mapping, num_
             shuffle=True,
             pin_memory=True,
             num_workers=num_workers,
-            collate_fn=collate_fn)
+            collate_fn=collate_fn, drop_last=True)
     return data_loader
 # %%

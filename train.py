@@ -37,7 +37,7 @@ def main():
     # param
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=0)
-    parser.add_argument('--model_name', type=str, default='roberta-base')
+    parser.add_argument('--model_name', type=str, default='roberta-base', help='bert, roberta, and gpt2 are supported')
     parser.add_argument('--max_length', type=int, default=64)
     parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--val_batch_size', type=int, default=32)
@@ -58,7 +58,7 @@ def main():
 
     # for soft prompt only
     parser.add_argument('--prompt', type=str, default='soft', help='soft or hard')
-    parser.add_argument('--dual_optim', action='store_true', default=False, help='set True if separate learning rate in maskedlm p-prompt setting is desired')
+    #parser.add_argument('--dual_optim', action='store_true', default=False, help='set True if separate learning rate in maskedlm p-prompt setting is desired')
     parser.add_argument('--dropout', type=float, default=0.1)
 
     # for baseline only
@@ -94,11 +94,7 @@ def main():
     HIGHLIGHT_ENTITY = None
     if args.highlight_entity is not None:
         HIGHLIGHT_ENTITY = args.highlight_entity.split('-')
-
-    # check dual_optim
-    if args.dual_optim and ((not IS_P_PROMPT) or args.model == 'baseline'):
-        print('[ERROR] dual_optim is only supported in MaskedLM and is_p_promt setting')
-        raise ValueError    
+ 
 
     # get tag list
     print('get tag list...')
@@ -137,15 +133,7 @@ def main():
         assert False, print(f'invalid loss {args.loss}!')
 
     # initialize optimizer
-    if args.dual_optim:
-        print(f'using dual optim, embed_lr: {args.embed_lr}, lr:{args.lr}')
-        bert_param = [p for p in model.parameters() if id(p) not in list(map(id, model.prompt_embedding.parameters())) + list(map(id, model.prompt_linear.parameters()))]
-        optimizer = AdamW([
-                {'params': bert_param},
-                {'params': model.prompt_embedding.parameters(), 'lr': args.embed_lr}
-            ], lr=args.lr)
-    else:
-        optimizer = AdamW(model.parameters(), lr=args.lr)
+    optimizer = AdamW(model.parameters(), lr=args.lr)
     global_train_iter = int(args.epoch * len(train_dataloader) / args.grad_accum_step + 0.5)
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_step, num_training_steps=global_train_iter)
 
@@ -260,6 +248,7 @@ def main():
         load_path =  args.load_ckpt
     else:
         load_path = MODEL_SAVE_PATH
+        print(f'no load_ckpt designated, will load {MODEL_SAVE_PATH} automatically...')
     model_dict = torch.load(load_path).state_dict()
     load_info = model.load_state_dict(model_dict)
     print(load_info)
