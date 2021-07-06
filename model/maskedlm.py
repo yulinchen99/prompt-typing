@@ -33,8 +33,6 @@ class Prompt:
 
 class EntityTypingModel(nn.Module):
     def __init__(self, model_name, idx2tag, tag_list, prompt_mode):
-        # prompt: a list of words
-
         nn.Module.__init__(self)
         config = AutoConfig.from_pretrained(model_name)
         if isinstance(config, RobertaConfig):
@@ -70,19 +68,15 @@ class EntityTypingModel(nn.Module):
         return torch.cat(tag_logits, dim=-1) # (batch_num, tag_num)
 
     def __get_tag_score__(self, output, mask):
-        if not isinstance(self.tokenizer, GPT2Tokenizer):
-            out_score = output.logits
-            # get score at position [MASK]
-            tag_score = []
-            for idx, score in enumerate(out_score):
-                tag_score.append(score[mask[idx]==1][-2].unsqueeze(0))
-            tag_score = torch.cat(tag_score, dim=0)
-        else:
-            out_score = output.logits
-            tag_score = []
-            for idx, score in enumerate(out_score):
-                tag_score.append(score[mask[idx]==1][-1].unsqueeze(0))
-            tag_score = torch.cat(tag_score, dim=0)
+        pred_pos = -2 # the token position for token prediction
+        if isinstance(self.tokenizer, GPT2Tokenizer):
+            pred_pos = -1
+        
+        out_score = output.logits
+        tag_score = []
+        for idx, score in enumerate(out_score):
+            tag_score.append(score[mask[idx]==1][pred_pos].unsqueeze(0))
+        tag_score = torch.cat(tag_score, dim=0)
         return tag_score
 
     def concat_word_prompt_embedding(self, word_embed, prompt_embed, mask_embed, word_attention_mask, inputs):

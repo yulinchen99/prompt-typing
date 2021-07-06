@@ -110,3 +110,4 @@ result/
 test-result/
 *.log
 *.slurm
+*.json
