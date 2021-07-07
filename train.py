@@ -1,6 +1,6 @@
 import argparse
 from transformers import BertConfig, RobertaConfig
-from util.data_loader import get_loader
+from util.data_loader import get_loader, EntityTypingDataset
 from model.baseline import EntityTypingModel as BaselineModel
 from model.maskedlm import EntityTypingModel as MaskedLM
 from util.util import load_tag_mapping, get_tag2inputid, get_tag_list, ResultLog, get_tokenizer, PartialLabelLoss
@@ -54,6 +54,8 @@ def main():
     parser.add_argument('--test_only', action='store_true', default=False)
     parser.add_argument('--load_ckpt', type=str, default=None)
     parser.add_argument('--ckpt_name', type=str, default=None)
+    parser.add_argument('--sample_rate', type=float, default=None, help='default training on all samples, set a number between 0 and 1 to train on partial samples')
+
 
 
     # for soft prompt only
@@ -120,9 +122,12 @@ def main():
 
     # initialize dataloader
     print(f'initializing data from {args.data}...')
-    train_dataloader = get_loader(args.data, 'train', args.batch_size, args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
-    val_dataloader = get_loader(args.data, 'dev', args.val_batch_size, args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
-    test_dataloader = get_loader(args.data, 'test', args.val_batch_size, args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
+    train_dataset = EntityTypingDataset(args.data, 'train', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY, sample_rate=args.sample_rate)
+    train_dataloader = get_loader(train_dataset, args.batch_size)
+    val_dataset = EntityTypingDataset(args.data, 'dev', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
+    val_dataloader = get_loader(val_dataset, args.val_batch_size)
+    test_dataset = EntityTypingDataset(args.data, 'test', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
+    test_dataloader = get_loader(test_dataset, args.val_batch_size)
 
     # initialize loss
     if args.loss == 'cross':
