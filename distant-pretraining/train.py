@@ -59,9 +59,9 @@ def evaluate(model, step, test_dataloader, Loss):
             test_loss.append(loss.item())
             test_acc.append(acc)
 
-    print('STEP %d: test loss %.4f, test acc: %.4f'%(step, np.mean(test_loss), np.mean(test_acc)))
+    print('STEP %d: test loss %.4f, test acc: %.4f\n'%(step, np.mean(test_loss), np.mean(test_acc)))
     with open(model_save_path + '/report.txt', 'a+')as f:
-        f.writelines('STEP %d: test loss %.4f, test acc: %.4f'%(step, np.mean(test_loss), np.mean(test_acc)))
+        f.writelines('STEP %d: test loss %.4f, test acc: %.4f\n'%(step, np.mean(test_loss), np.mean(test_acc)))
     save_path = model_save_path + f'/{step}'
     model.save(save_path)
     return np.mean(test_loss)
@@ -72,7 +72,8 @@ def train():
     # load data
     print('loading data...')
     datalist = load_data(args.datapath)
-    train, test, _, _ = train_test_split(datalist, [0]*len(datalist), random_state=0, test_size=0.2)
+    datalist = random.sample(datalist, 200000)
+    train, test, _, _ = train_test_split(datalist, [0]*len(datalist), random_state=0, test_size=0.1)
     print('building dataloader...')
     train_dataloader = get_loader(train, args.train_batch_size)
     test_dataloader = get_loader(test, args.test_batch_size)

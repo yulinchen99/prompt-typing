@@ -5,6 +5,10 @@ from transformers import AutoConfig, RobertaConfig, BertConfig, RobertaForMasked
 import numpy as np
 
 random.seed(0)
+
+def normalize(data):
+    return torch.nn.functional.normalize(data, dim=1)
+
 class PretrainModel(nn.Module):
     def __init__(self, model_name, alpha=0.7, blank_token='[BLANK]', device='cuda:0'):
         nn.Module.__init__(self)
@@ -85,8 +89,8 @@ class PretrainModel(nn.Module):
         sent1_hidden_state = self.get_mask_hidden_state(sent1_input, sent1_mask)
         sent2_hidden_state = self.get_mask_hidden_state(sent2_input, sent2_mask)
         # compute score
-        score = torch.diag(torch.mm(sent1_hidden_state, sent2_hidden_state.t())) / np.sqrt(sent1_hidden_state.size(1))
-        p = 1.0 / (1.0 + torch.exp(score))
+        score = torch.sum(normalize(sent1_hidden_state).mul(normalize(sent2_hidden_state)), dim=1)
+        p = 1.0 - 1.0 / (1.0 + torch.exp(score))
         return sent1_hidden_state, sent2_hidden_state, p
 
 
