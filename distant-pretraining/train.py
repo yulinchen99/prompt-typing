@@ -10,6 +10,7 @@ import torch
 from torch.optim import AdamW, lr_scheduler
 from tqdm import tqdm
 import argparse
+from sklearn.metrics import accuracy_score
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--seed', type=int, default=0)
@@ -46,17 +47,21 @@ def evaluate(model, step, test_dataloader, Loss):
     print('start testing...')
     model.eval()
     test_loss = []
+    test_acc = []
     with torch.no_grad():
         for data, label in tqdm(test_dataloader):
             label = label.to(device)
-            sent1_embed, sent2_embed = model(data)
-            loss = Loss(sent1_embed, sent2_embed, label)
+            sent1_embed, sent2_embed, score = model(data)
+            pred = (score + 0.5).floor()
+            acc = accuracy_score(label.detach().numpy(), pred.detach().numpy())
+            loss = Loss(sent1_embed, sent2_embed, score, label)
 
             test_loss.append(loss.item())
+            test_acc.append(acc)
 
-    print('STEP %d: test loss %.4f'%(step, np.mean(test_loss)))
+    print('STEP %d: test loss %.4f, test acc: %.4f'%(step, np.mean(test_loss), np.mean(test_acc)))
     with open(model_save_path + '/report.txt', 'a+')as f:
-        f.writelines('STEP %d: test loss %.4f\n'%(step, np.mean(test_loss)))
+        f.writelines('STEP %d: test loss %.4f, test acc: %.4f'%(step, np.mean(test_loss), np.mean(test_acc)))
     save_path = model_save_path + f'/{step}'
     model.save(save_path)
     return np.mean(test_loss)
@@ -91,15 +96,20 @@ def train():
     step = 0
     train_report_loss = []
     train_step_loss = []
+    train_step_acc = []
     print('start training...')
     for i in range(args.epoch):
         print(f'-----------epoch {i}----------------')
         for data, label in tqdm(train_dataloader):
             label = label.to(device)
-            sent1_embed, sent2_embed = model(data)
-            loss = Loss(sent1_embed, sent2_embed, label)
+            sent1_embed, sent2_embed, score = model(data)
+            pred = (score + 0.5).floor()
+            acc = accuracy_score(label.detach().numpy(), pred.detach().numpy())
+
+            loss = Loss(sent1_embed, sent2_embed, score, label)
             loss.backward()
 
+            train_step_acc.append(acc)
             train_report_loss.append(loss.item())
             step += 1
 
@@ -109,9 +119,10 @@ def train():
                 optimizer.zero_grad()
 
             if step % (args.train_print_step) == 0:
-                print('[TRAIN STEP %d] loss: %.4f' % (step, np.mean(train_report_loss)))
+                print('[TRAIN STEP %d] loss: %.4f, acc: %.4f' % (step, np.mean(train_report_loss), np.mean(train_step_acc)))
                 train_step_loss += train_report_loss
                 train_report_loss = []
+                train_step_acc = []
                 torch.cuda.empty_cache()
 
             if step % args.eval_step == 0:

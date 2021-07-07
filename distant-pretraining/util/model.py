@@ -84,15 +84,16 @@ class PretrainModel(nn.Module):
         sent2_input, sent2_mask = self.tokenize(inputs['sent2'], inputs['pos2'], inputs['entity_name'])
         sent1_hidden_state = self.get_mask_hidden_state(sent1_input, sent1_mask)
         sent2_hidden_state = self.get_mask_hidden_state(sent2_input, sent2_mask)
-        return sent1_hidden_state, sent2_hidden_state
+        # compute score
+        score = torch.diag(torch.mm(sent1_hidden_state, sent2_hidden_state.t())) / np.sqrt(sent1_hidden_state.size(1))
+        p = 1.0 / (1.0 + torch.exp(score))
+        return sent1_hidden_state, sent2_hidden_state, p
 
 
 class MTBLoss(nn.Module):
     def __init__(self):
         nn.Module.__init__(self)
 
-    def forward(self, sent1_embed, sent2_embed, labels):
-        score = torch.diag(torch.mm(sent1_embed, sent2_embed.t())) / np.sqrt(sent1_embed.size(1))
-        log_p = - torch.log(1.0 + torch.exp(score))
-        loss = torch.sum(torch.mul(labels, log_p) + torch.mul((1-labels), log_p))
+    def forward(self, sent1_embed, sent2_embed, p, labels):
+        loss = torch.sum(torch.mul(labels, torch.log(p)) + torch.mul((1-labels), torch.log(1-p)))
         return - loss / sent1_embed.size(0)
