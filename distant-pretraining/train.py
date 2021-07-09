@@ -32,8 +32,8 @@ parser.add_argument('--eval_step', type=int, default=100, help='val every x step
 
 args = parser.parse_args()
 
-device='cpu'
-model_save_path = f'./result/{args.model_name}'
+device='cuda:0'
+model_save_path = f'./result/{args.model_name}-{args.lr}'
 if not os.path.exists(model_save_path):
     os.mkdir(model_save_path)
 def set_seed(seed=0):
@@ -53,7 +53,7 @@ def evaluate(model, step, test_dataloader, Loss):
             label = label.to(device)
             sent1_embed, sent2_embed, score = model(data)
             pred = (score + 0.5).floor()
-            acc = accuracy_score(label.detach().numpy(), pred.detach().numpy())
+            acc = accuracy_score(label.detach().cpu().numpy(), pred.detach().cpu().numpy())
             loss = Loss(sent1_embed, sent2_embed, score, label)
 
             test_loss.append(loss.item())
@@ -98,21 +98,28 @@ def train():
     train_report_loss = []
     train_step_loss = []
     train_step_acc = []
+
     print('start training...')
     for i in range(args.epoch):
         print(f'-----------epoch {i}----------------')
         for data, label in tqdm(train_dataloader):
-            label = label.to(device)
-            sent1_embed, sent2_embed, score = model(data)
-            pred = (score + 0.5).floor()
-            acc = accuracy_score(label.detach().numpy(), pred.detach().numpy())
+            try:
+                label = label.to(device)
+                sent1_embed, sent2_embed, score = model(data)
+                #print(score)
+                pred = (score + 0.5).floor()
+                acc = accuracy_score(label.detach().cpu().numpy(), pred.detach().cpu().numpy())
 
-            loss = Loss(sent1_embed, sent2_embed, score, label)
-            loss.backward()
+                loss = Loss(sent1_embed, sent2_embed, score, label)
+                loss.backward()
 
-            train_step_acc.append(acc)
-            train_report_loss.append(loss.item())
-            step += 1
+                train_step_acc.append(acc)
+                train_report_loss.append(loss.item())
+                step += 1
+            except:
+                print(f'ERROR on step {step}:', sent1_embed, data, list(model.named_parameters()))
+                step += 1
+                continue
 
             if step % args.grad_accum_step == 0:
                 optimizer.step()

@@ -37,7 +37,7 @@ def main():
     # param
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=0)
-    parser.add_argument('--model_name', type=str, default='roberta-base', help='bert, roberta, and gpt2 are supported')
+    parser.add_argument('--model_name', type=str, default='roberta-base', help='bert-base-cased, roberta-base, and gpt2 are supported, or a pretrained model save path')
     parser.add_argument('--max_length', type=int, default=64)
     parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--val_batch_size', type=int, default=32)
@@ -81,7 +81,11 @@ def main():
 
     # model saving path
     data = args.data.split('/')[-1]
-    MODEL_SAVE_PATH = os.path.join(args.save_dir, f'{args.model}-{args.model_name}-{data}-{args.prompt}-seed_{args.seed}')
+    if '/' not in args.model_name:
+        model_name = args.model_name
+    else:
+        model_name = '-'.join(args.model_name.split('/')[-2:])
+    MODEL_SAVE_PATH = os.path.join(args.save_dir, f'{args.model}-{model_name}-{data}-{args.prompt}-seed_{args.seed}')
     if args.ckpt_name:
         MODEL_SAVE_PATH += '_' + args.ckpt_name
 

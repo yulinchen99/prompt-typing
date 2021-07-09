@@ -37,15 +37,15 @@ class EntityTypingModel(nn.Module):
         config = AutoConfig.from_pretrained(model_name)
         if isinstance(config, RobertaConfig):
             self.model = RobertaForMaskedLM.from_pretrained(model_name)
-            self.tokenizer = RobertaTokenizer.from_pretrained(model_name)
+            self.tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
             #self.word_embedding = self.model.roberta.get_input_embeddings()
         elif isinstance(config, BertConfig):
             self.model = BertForMaskedLM.from_pretrained(model_name)
-            self.tokenizer = BertTokenizer.from_pretrained(model_name)
+            self.tokenizer = BertTokenizer.from_pretrained('bert-base-cased')
             #self.word_embedding = self.model.bert.get_input_embeddings()
         elif isinstance(config, GPT2Config):
             self.model = GPT2LMHeadModel.from_pretrained(model_name)
-            self.tokenizer = GPT2Tokenizer.from_pretrained(model_name)
+            self.tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
         else:
             print('unsupported model name')
             raise ValueError

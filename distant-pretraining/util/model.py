@@ -3,6 +3,7 @@ import random
 import torch
 from transformers import AutoConfig, RobertaConfig, BertConfig, RobertaForMaskedLM, BertForMaskedLM, RobertaTokenizer, BertTokenizer, GPT2Config, GPT2Tokenizer, GPT2LMHeadModel
 import numpy as np
+import torch.nn.functional as F
 
 random.seed(0)
 
@@ -78,7 +79,10 @@ class PretrainModel(nn.Module):
         return mask_hidden_states
 
     def save(self, save_path):
-        self.model.save_pretrained(save_path)
+        if isinstance(self.model, nn.DataParallel):
+            self.model.module.save_pretrained(save_path)
+        else:
+            self.model.save_pretrained(save_path)
 
     
     def forward(self, inputs):
@@ -89,8 +93,10 @@ class PretrainModel(nn.Module):
         sent1_hidden_state = self.get_mask_hidden_state(sent1_input, sent1_mask)
         sent2_hidden_state = self.get_mask_hidden_state(sent2_input, sent2_mask)
         # compute score
-        score = torch.sum(normalize(sent1_hidden_state).mul(normalize(sent2_hidden_state)), dim=1)
-        p = 1.0 - 1.0 / (1.0 + torch.exp(score))
+        score = F.cosine_similarity(sent1_hidden_state, sent2_hidden_state)
+        #print(score)
+        #p = 1.0 - 1.0 / (1.0 + torch.exp(score))
+        p = 0.5 + 0.5 * score
         return sent1_hidden_state, sent2_hidden_state, p
 
 
@@ -99,5 +105,5 @@ class MTBLoss(nn.Module):
         nn.Module.__init__(self)
 
     def forward(self, sent1_embed, sent2_embed, p, labels):
-        loss = torch.sum(torch.mul(labels, torch.log(p)) + torch.mul((1-labels), torch.log(1-p)))
+        loss = torch.sum(torch.mul(labels, torch.log(p+1e-6)) + torch.mul((1-labels), torch.log(1-p+1e-6)))
         return - loss / sent1_embed.size(0)
