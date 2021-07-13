@@ -85,7 +85,7 @@ def main():
         model_name = args.model_name
     else:
         model_name = '-'.join(args.model_name.split('/')[-2:])
-    MODEL_SAVE_PATH = os.path.join(args.save_dir, f'{args.model}-{model_name}-{data}-{args.prompt}-seed_{args.seed}')
+    MODEL_SAVE_PATH = os.path.join(args.save_dir, f'{args.model}-{model_name}-{data}-{args.prompt}-seed_{args.seed}-{args.sample_rate}')
     if args.ckpt_name:
         MODEL_SAVE_PATH += '_' + args.ckpt_name
 
