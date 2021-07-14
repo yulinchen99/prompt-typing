@@ -50,11 +50,12 @@ def main():
     parser.add_argument('--grad_accum_step', type=int, default=10)
     parser.add_argument('--warmup_step', type=int, default=100)
     parser.add_argument('--val_step', type=int, default=2000, help='val every x steps of training')
+    parser.add_argument('--val_iter', type=int, default=None, help='val iter')
     parser.add_argument('--save_dir', type=str, default='checkpoint')
     parser.add_argument('--test_only', action='store_true', default=False)
     parser.add_argument('--load_ckpt', type=str, default=None)
     parser.add_argument('--ckpt_name', type=str, default=None)
-    parser.add_argument('--sample_rate', type=float, default=None, help='default training on all samples, set a number between 0 and 1 to train on partial samples')
+    parser.add_argument('--sample_num', type=int, default=None, help='default training on all samples, set a number to indicate how many samples in each type are sampled as training set')
 
 
 
@@ -85,7 +86,7 @@ def main():
         model_name = args.model_name
     else:
         model_name = '-'.join(args.model_name.split('/')[-2:])
-    MODEL_SAVE_PATH = os.path.join(args.save_dir, f'{args.model}-{model_name}-{data}-{args.prompt}-seed_{args.seed}-{args.sample_rate}')
+    MODEL_SAVE_PATH = os.path.join(args.save_dir, f'{args.model}-{model_name}-{data}-{args.prompt}-seed_{args.seed}-{args.sample_num}')
     if args.ckpt_name:
         MODEL_SAVE_PATH += '_' + args.ckpt_name
 
@@ -126,7 +127,7 @@ def main():
 
     # initialize dataloader
     print(f'initializing data from {args.data}...')
-    train_dataset = EntityTypingDataset(args.data, 'train', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY, sample_rate=args.sample_rate)
+    train_dataset = EntityTypingDataset(args.data, 'train', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY, sample_num=args.sample_num)
     train_dataloader = get_loader(train_dataset, args.batch_size)
     val_dataset = EntityTypingDataset(args.data, 'dev', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
     val_dataloader = get_loader(val_dataset, args.val_batch_size)
@@ -216,7 +217,9 @@ def main():
                         model.eval()
                         y_true = []
                         y_pred = []
-                        for data in tqdm(val_dataloader):
+
+                        val_iter = 0
+                        for data in val_dataloader:
                             to_cuda(data)
                             tag_score = model(data)
                             tag_pred = torch.argmax(tag_score, dim=1)
@@ -224,6 +227,10 @@ def main():
                             y_true += data['labels'].cpu().numpy().tolist()
                             #acc = accuracy_score(data['labels'].cpu().numpy(), tag_pred.cpu().numpy())
                             #step_val_acc.append(acc)
+
+                            val_iter += 1
+                            if val_iter == args.val_iter:
+                                break
 
                         #val_acc = np.mean(step_val_acc)
                         val_acc, val_micro, val_macro = get_metrics(y_true, y_pred, idx2oritag, isfewnerd=IS_FEWNERD)
