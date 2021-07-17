@@ -18,4 +18,4 @@ python -u train.py --model maskedlm --model_name roberta-base --data $data --pro
 python -u train.py --model maskedlm --model_name roberta-base --data $data --prompt $prompt  --lr 1e-5 --sample_rate 0.1
 
 # test only
-# python -u train.py --model maskedlm --model_name roberta-base --data $data --prompt $prompt --test_only
+# python -u train.py --model maskedlm --model_name roberta-base --data $data --prompt $prompt --test_only --load_ckpt ...

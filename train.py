@@ -156,7 +156,6 @@ def main():
     resultlog = ResultLog(args, result_save_path)
 
     # train
-    print('######### start training ##########')
     epoch = args.epoch
     step = 0
     # logging
@@ -178,6 +177,7 @@ def main():
             model_dict = torch.load(load_path).state_dict()
             load_info = model.load_state_dict(model_dict)
             print(load_info)
+        print('######### start training ##########') 
         for i in range(epoch):
             print(f'---------epoch {i}---------')
             model.train()
@@ -260,14 +260,16 @@ def main():
 
     # test
     print('################# start testing #################')
+    load_path = ''
     if args.load_ckpt is not None:
         load_path =  args.load_ckpt
-    else:
-        load_path = MODEL_SAVE_PATH
-        print(f'no load_ckpt designated, will load {MODEL_SAVE_PATH} automatically...')
-    model_dict = torch.load(load_path).state_dict()
-    load_info = model.load_state_dict(model_dict)
-    print(load_info)
+    #else:
+    #    load_path = MODEL_SAVE_PATH
+    #    print(f'no load_ckpt designated, will load {MODEL_SAVE_PATH} automatically...')
+    if load_path:
+        model_dict = torch.load(load_path).state_dict()
+        load_info = model.load_state_dict(model_dict)
+        print(load_info)
     y_true = []
     y_pred = []
     with torch.no_grad():
