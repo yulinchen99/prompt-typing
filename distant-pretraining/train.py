@@ -11,6 +11,7 @@ from torch.optim import AdamW, lr_scheduler
 from tqdm import tqdm
 import argparse
 from sklearn.metrics import accuracy_score
+from util.util import get_tokenizer, load_tag_mapping, get_label_ids
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--seed', type=int, default=0)
@@ -19,6 +20,7 @@ parser.add_argument('--model_name', type=str, default='roberta-base', help='bert
 parser.add_argument('--train_batch_size', type=int, default=8)
 parser.add_argument('--test_batch_size', type=int, default=32)
 parser.add_argument('--datapath', type=str, default='./data/samples.json')
+parser.add_argument('--labelpath', type=str, default='../data/fewnerd')
 parser.add_argument('--epoch', type=int, default=10)
 parser.add_argument('--lr', type=float, default=1e-4)
 parser.add_argument('--lr_step_size', type=int, default=200)
@@ -27,7 +29,7 @@ parser.add_argument('--grad_accum_step', type=int, default=10)
 parser.add_argument('--warmup_step', type=int, default=100)
 parser.add_argument('--eval_step', type=int, default=100, help='val every x steps of training')
 #parser.add_argument('--test_only', action='store_true', default=False)
-#parser.add_argument('--load_ckpt', type=str, default=None)
+parser.add_argument('--load_ckpt', type=str, default=None)
 #parser.add_argument('--ckpt_name', type=str, default=None)
 
 args = parser.parse_args()
@@ -72,15 +74,24 @@ def train():
     # load data
     print('loading data...')
     datalist = load_data(args.datapath)
-    datalist = random.sample(datalist, 200000)
+    #datalist = random.sample(datalist, 1000000)
     train, test, _, _ = train_test_split(datalist, [0]*len(datalist), random_state=0, test_size=0.1)
     print('building dataloader...')
     train_dataloader = get_loader(train, args.train_batch_size)
     test_dataloader = get_loader(test, args.test_batch_size)
 
+    # get label_ids
+    tokenizer = get_tokenizer(args.model_name)
+    tag_mapping = load_tag_mapping(args.labelpath)
+    label_ids = get_label_ids(tokenizer, tag_mapping)
+    #print(label_ids)
+
+
     # initialize model 
     print('initializing model...')
-    model = PretrainModel(args.model_name, device=device)
+    model = PretrainModel(args.model_name, device=device, label_ids=label_ids)
+    if args.load_ckpt:
+        model.load(args.load_ckpt)
     if 'cuda' in device:
         model = model.cuda()
 
@@ -95,6 +106,8 @@ def train():
     train_loss = []
     test_loss = []
     step = 0
+    if args.load_ckpt:
+        step = int(args.load_ckpt.split('/')[-1])
     train_report_loss = []
     train_step_loss = []
     train_step_acc = []
@@ -103,23 +116,23 @@ def train():
     for i in range(args.epoch):
         print(f'-----------epoch {i}----------------')
         for data, label in tqdm(train_dataloader):
-            try:
-                label = label.to(device)
-                sent1_embed, sent2_embed, score = model(data)
-                #print(score)
-                pred = (score + 0.5).floor()
-                acc = accuracy_score(label.detach().cpu().numpy(), pred.detach().cpu().numpy())
+            #try:
+            label = label.to(device)
+            sent1_embed, sent2_embed, score = model(data)
+            #print(score)
+            pred = (score + 0.5).floor()
+            acc = accuracy_score(label.detach().cpu().numpy(), pred.detach().cpu().numpy())
 
-                loss = Loss(sent1_embed, sent2_embed, score, label)
-                loss.backward()
+            loss = Loss(sent1_embed, sent2_embed, score, label)
+            loss.backward()
 
-                train_step_acc.append(acc)
-                train_report_loss.append(loss.item())
-                step += 1
-            except:
-                print(f'ERROR on step {step}:', sent1_embed, data, list(model.named_parameters()))
-                step += 1
-                continue
+            train_step_acc.append(acc)
+            train_report_loss.append(loss.item())
+            step += 1
+            #except:
+                #print(f'ERROR on step {step}:', sent1_embed, data, list(model.named_parameters()))
+                #step += 1
+                #continue
 
             if step % args.grad_accum_step == 0:
                 optimizer.step()

@@ -11,7 +11,7 @@ def normalize(data):
     return torch.nn.functional.normalize(data, dim=1)
 
 class PretrainModel(nn.Module):
-    def __init__(self, model_name, alpha=0.7, blank_token='[BLANK]', device='cuda:0'):
+    def __init__(self, model_name, alpha=0.7, blank_token='[BLANK]', device='cuda:0', label_ids=None):
         nn.Module.__init__(self)
         config = AutoConfig.from_pretrained(model_name)
         if isinstance(config, RobertaConfig):
@@ -36,6 +36,8 @@ class PretrainModel(nn.Module):
         self.model.resize_token_embeddings(config.vocab_size + num_added_tokens)
         if 'cuda' in device:
             self.model = nn.DataParallel(self.model)
+
+        self.label_ids = label_ids
 
     def get_prompt_sentence(self, sent, pos, entity_name):
         # replace entities
@@ -65,6 +67,29 @@ class PretrainModel(nn.Module):
         tokenized_sent = self.tokenizer(new_sent_list, is_split_into_words=True, return_tensors='pt', padding=True)
         return tokenized_sent['input_ids'].to(self.device), tokenized_sent['attention_mask'].to(self.device)
 
+    def get_mask_logits(self, input_ids, attention_mask):
+        output = self.model(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
+        pred_pos = -2 # the token position for token prediction
+
+        if isinstance(self.tokenizer, GPT2Tokenizer):
+            pred_pos = -1
+
+        mask_logits_all = []
+        logits = output.logits
+        #print(logits.shape)
+        for i, logit in enumerate(logits):
+            cur_mask_logits_all = logit[attention_mask[i]==1,:][pred_pos].unsqueeze(0)
+            mask_logits_all.append(cur_mask_logits_all)
+        mask_logits_all = torch.cat(mask_logits_all, dim=0) # (batch_size, vocab_size)
+        #print(mask_logits_all.shape)
+
+        mask_logits = []
+        for label_id in self.label_ids:
+            mask_logits.append(torch.mean(mask_logits_all[:,label_id], dim=1).unsqueeze(-1)) # (batch_size, 1)
+        mask_logits = torch.cat(mask_logits, dim=-1) # (batch_size, label_size)
+        #print(mask_logits.shape)
+        return mask_logits
+
     def get_mask_hidden_state(self, input_ids, attention_mask):
         output = self.model(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
         pred_pos = -2 # the token position for token prediction
@@ -84,14 +109,26 @@ class PretrainModel(nn.Module):
         else:
             self.model.save_pretrained(save_path)
 
+    def load(self, load_path):
+        if isinstance(self.model, nn.DataParallel):
+            self.model.module.from_pretrained(load_path)
+        else:
+            self.model.from_pretrained(load_path)
+
+
     
     def forward(self, inputs):
         # inputs:{'sent1':List[List[str]], 'sent2':List[List[str]], 
         #'pos1': List[List[int]], 'pos2': List[List[int]], 'entity_name':str}
         sent1_input, sent1_mask = self.tokenize(inputs['sent1'], inputs['pos1'], inputs['entity_name'])
         sent2_input, sent2_mask = self.tokenize(inputs['sent2'], inputs['pos2'], inputs['entity_name'])
-        sent1_hidden_state = self.get_mask_hidden_state(sent1_input, sent1_mask)
-        sent2_hidden_state = self.get_mask_hidden_state(sent2_input, sent2_mask)
+        if not self.label_ids:
+            sent1_hidden_state = self.get_mask_hidden_state(sent1_input, sent1_mask)
+            sent2_hidden_state = self.get_mask_hidden_state(sent2_input, sent2_mask)
+        else:
+            sent1_hidden_state = self.get_mask_logits(sent1_input, sent1_mask)
+            sent2_hidden_state = self.get_mask_logits(sent2_input, sent2_mask)
+            #print(sent1_hidden_state.shape)
         # compute score
         score = F.cosine_similarity(sent1_hidden_state, sent2_hidden_state)
         #print(score)

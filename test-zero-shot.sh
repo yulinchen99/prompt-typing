@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=8         # 单任务使用的 CPU 核心数为 4
 
 # zero shot test on semi-supervised pretrained model
-python -u train.py --model maskedlm --data fewnerd --prompt hard  --test_only --model_name distant-pretraining/result/bert-base-cased-2e-05/15000
+python -u train.py --model maskedlm --data fewnerd --prompt hard  --test_only --model_name distant-pretraining/result/bert-base-cased-2e-05/5000
 
 # zero shot test on bert-base-cased
 #python -u train.py --model maskedlm --data fewnerd --prompt hard  --test_only --model_name bert-base-cased
