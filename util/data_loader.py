@@ -110,6 +110,6 @@ def get_loader(dataset, batch_size, num_workers=8, collate_fn=collate_fn):
             shuffle=True,
             pin_memory=True,
             num_workers=num_workers,
-            collate_fn=collate_fn, drop_last=True)
+            collate_fn=collate_fn, drop_last=False)
     return data_loader
 # %%

@@ -5,17 +5,29 @@ import torch
 import torch.nn as nn
 from transformers import AutoConfig, RobertaConfig, BertConfig, RobertaForMaskedLM, BertForMaskedLM, RobertaTokenizer, BertTokenizer, GPT2Config, GPT2Tokenizer, GPT2LMHeadModel
 import torch.nn.functional as F
-
+import os
 class Prompt:
     def __init__(self):
         # each prompt is [separation_token, prompt_word1, prompt_word2, ...]
         self.prompt_dict = {
             'soft':['[P1]','[P2]'],
-            'hard':['is']
+            'hard3':['is', 'a'], 
+            'hard1':['is'],
+            'hard2':['is', 'a'],
+            'soft1': ['[P1]', '[P2]', '[P3]'],
+            'soft2': ['[P1]', '[P2]', '[P3]', '[P4]'],
+            'soft3': ['[P1]', '[P2]', '[P3]', '[P4]', '[P5]']
+
+            
         }
         self.sep_dict = {
             'soft': ['[P]'],
-            'hard': []
+            'hard3': ['In', 'this', 'sentence', ','],
+            'hard2':[''],
+            'hard1':[''],
+            'soft1': ['[P]'],
+            'soft2': ['[P]'],
+            'soft3': ['[P]'],
         }
         self.prompt = None
 
@@ -24,12 +36,16 @@ class Prompt:
             print(f'no prompt for mode {prompt_mode}')
             raise ValueError
         else:
-            return self.sep_dict[prompt_mode] + self.prompt_dict[prompt_mode]
+            tokens = self.sep_dict[prompt_mode] + self.prompt_dict[prompt_mode]
+            tokens = [t for t in tokens if t]
+            return tokens
     
     def get_prompt_sentence(self, words, pos, prompt_mode):
         prompt = self.prompt_dict[prompt_mode]
         sep = self.sep_dict[prompt_mode]
-        return words + sep + words[pos[0]:pos[1]] + prompt
+        newwords = words + sep + words[pos[0]:pos[1]] + prompt
+        newwords = [w for w in newwords if w]
+        return newwords
 
 class EntityTypingModel(nn.Module):
     def __init__(self, model_name, idx2tag, tag_list, prompt_mode):

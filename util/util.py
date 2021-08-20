@@ -6,6 +6,7 @@ import torch.nn as nn
 
 def load_tag_mapping(datadir):
     filepath = os.path.join(datadir, 'tag_mapping.txt')
+    print(filepath)
     df = pd.read_csv(filepath, sep='\t', header=None)
     tag_mapping = dict(zip(list(df[0]), list(df[1])))
     return tag_mapping

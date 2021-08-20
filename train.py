@@ -1,3 +1,4 @@
+import sys
 import argparse
 from transformers import BertConfig, RobertaConfig
 from util.data_loader import get_loader, EntityTypingDataset
@@ -16,6 +17,8 @@ from transformers import get_linear_schedule_with_warmup
 import os
 import datetime
 from util.metrics import get_metrics
+import torch.nn.functional as F
+import pandas as pd
 #from memory_profiler import profile
 
 warnings.filterwarnings('ignore')
@@ -56,6 +59,9 @@ def main():
     parser.add_argument('--load_ckpt', type=str, default=None)
     parser.add_argument('--ckpt_name', type=str, default=None)
     parser.add_argument('--sample_num', type=int, default=None, help='default training on all samples, set a number to indicate how many samples in each type are sampled as training set')
+    parser.add_argument('--calibrate', action='store_true', default=False)
+    parser.add_argument('--save_result', action='store_true', default=False)
+
 
 
 
@@ -75,10 +81,13 @@ def main():
     set_seed(args.seed)
 
     # data path
+    # main_dir = '/mnt/sfs_turbo/cyl/ner-mlm/'
+    main_dir = sys.path[0] + '/'
     IS_FEWNERD=args.data=='fewnerd'
     if IS_FEWNERD:
         print('is fewnerd')
-    args.data = os.path.join('data', args.data)
+    args.data = os.path.join(main_dir + 'data', args.data)
+    print('data path:', args.data)
 
     # model saving path
     data = args.data.split('/')[-1]
@@ -86,7 +95,7 @@ def main():
         model_name = args.model_name
     else:
         model_name = '-'.join(args.model_name.split('/')[-2:])
-    MODEL_SAVE_PATH = os.path.join(args.save_dir, f'{args.model}-{model_name}-{data}-{args.prompt}-seed_{args.seed}-{args.sample_num}')
+    MODEL_SAVE_PATH = os.path.join(main_dir, args.save_dir, f'{args.model}-{model_name}-{data}-{args.prompt}-seed_{args.seed}-{args.sample_num}')
     if args.ckpt_name:
         MODEL_SAVE_PATH += '_' + args.ckpt_name
 
@@ -130,6 +139,9 @@ def main():
     train_dataset = EntityTypingDataset(args.data, 'train', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY, sample_num=args.sample_num)
     train_dataloader = get_loader(train_dataset, args.batch_size)
     val_dataset = EntityTypingDataset(args.data, 'dev', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
+    if args.sample_num is not None and len(train_dataset) < len(val_dataset):
+        val_dataset, _ = torch.utils.data.random_split(val_dataset, [len(train_dataset), len(val_dataset)-len(train_dataset)], generator=torch.Generator().manual_seed(0))
+    print('val dataset length ', len(val_dataset))
     val_dataloader = get_loader(val_dataset, args.val_batch_size)
     test_dataset = EntityTypingDataset(args.data, 'test', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
     test_dataloader = get_loader(test_dataset, args.val_batch_size)
@@ -148,7 +160,7 @@ def main():
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_step, num_training_steps=global_train_iter)
 
     # result log saving path
-    result_save_dir = 'result/'
+    result_save_dir = os.path.join(main_dir, 'result/')
     if not os.path.exists(result_save_dir):
         os.mkdir(result_save_dir)
     now = datetime.datetime.now().strftime("%Y-%m-%d-%H:%M:%S")
@@ -270,22 +282,61 @@ def main():
         model_dict = torch.load(load_path).state_dict()
         load_info = model.load_state_dict(model_dict)
         print(load_info)
+
     y_true = []
     y_pred = []
+    text = []
     with torch.no_grad():
         model.eval()
+        prior_dist = None
+
+        # calibration
+        if args.calibrate:
+            print('get prior distribution')
+            tag_dist = []
+            calib_dataset = random.sample(test_dataset.samples, 1000)
+            calib_dataloader = get_loader(calib_dataset, 1000)
+            for data in tqdm(calib_dataloader):
+                to_cuda(data)
+                tag_score = model(data)
+                tag_dist.append(F.softmax(tag_score))
+            tag_dist = torch.cat(tag_dist, dim=0)
+            prior_dist = torch.mean(tag_dist, dim=0)
+
         for data in tqdm(test_dataloader):
+
+            text += [' '.join(words) for words in data['words']]
+
             to_cuda(data)
             tag_score = model(data)
+
+            # divide by prior_dist
+            if prior_dist is not None:
+                tag_score = F.softmax(tag_score) / prior_dist
+
             tag_pred = torch.argmax(tag_score, dim=1)
             y_pred += tag_pred.cpu().numpy().tolist()
             y_true += data['labels'].cpu().numpy().tolist()
         #acc = accuracy_score(y_true, y_pred)
+        if 'ontonote' in args.data:
+            y_true = torch.LongTensor(y_true)
+            y_pred = torch.LongTensor(y_pred)
+            y_pred = y_pred[y_true != tag2idx['other']]
+            y_true = y_true[y_true != tag2idx['other']]
+            y_true = y_true.numpy().tolist()
+            y_pred = y_pred.numpy().tolist()
+        print(y_true[:100])
+        print(y_pred[:100])
         acc, micro, macro = get_metrics(y_true, y_pred, idx2oritag, isfewnerd=IS_FEWNERD)
         resultlog.update('test_acc', {'acc':acc, 'micro':micro, 'macro':macro})
         print('[TEST RESULT] accuracy: %.4f%%, micro:%s, macro:%s' % (acc*100, str(micro), str(macro)))
 
-
+        if args.save_result:
+            d = {'text':text, 'label':[idx2oritag[idx] for idx in y_true], 'pred':[idx2oritag[idx] for idx in y_pred]}
+            d = pd.DataFrame(d)
+            d.to_csv(os.path.join(main_dir, model_name+load_path+'-testresult.csv'))
+            print('test result saved')
+                
     
 
 if __name__ == '__main__':

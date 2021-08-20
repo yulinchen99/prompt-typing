@@ -30,14 +30,22 @@ parser.add_argument('--warmup_step', type=int, default=100)
 parser.add_argument('--eval_step', type=int, default=100, help='val every x steps of training')
 #parser.add_argument('--test_only', action='store_true', default=False)
 parser.add_argument('--load_ckpt', type=str, default=None)
-#parser.add_argument('--ckpt_name', type=str, default=None)
+parser.add_argument('--ckpt_name', type=str, default=None)
 
 args = parser.parse_args()
 
 device='cuda:0'
-model_save_path = f'./result/{args.model_name}-{args.lr}'
+model_name = args.model_name.split('/')[-1]
+label_name = args.labelpath.split('/')[-1]
+main_dir = sys.path[0]
+model_save_path = f'{main_dir}/result/{model_name}-{label_name}-{args.lr}'
+if args.ckpt_name:
+    model_save_path += f'-{args.ckpt_name}'
 if not os.path.exists(model_save_path):
     os.mkdir(model_save_path)
+with open(model_save_path + '/report.txt', 'a+')as f:
+    f.writelines(str(args))
+
 def set_seed(seed=0):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
@@ -45,7 +53,22 @@ def set_seed(seed=0):
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
 
-def evaluate(model, step, test_dataloader, Loss):
+def get_prior_distribution(model, datalist, sample_num=1000):
+    model.eval()
+    calib_data = random.sample(datalist, sample_num)
+    calib_dataloader = get_loader(calib_data, 200)
+    prior_dist = []
+    with torch.no_grad():
+        for data, label in tqdm(calib_dataloader):
+            label = label.to(device)
+            tag_dist = model.get_prior_distribution(data)
+            prior_dist.append(tag_dist)
+        prior_dist = torch.cat(prior_dist, dim=0)
+    prior_dist = torch.mean(prior_dist, dim=0)
+    return prior_dist
+
+
+def evaluate(model, step, test_dataloader, Loss, prior_dist=None):
     print('start testing...')
     model.eval()
     test_loss = []
@@ -53,7 +76,7 @@ def evaluate(model, step, test_dataloader, Loss):
     with torch.no_grad():
         for data, label in tqdm(test_dataloader):
             label = label.to(device)
-            sent1_embed, sent2_embed, score = model(data)
+            sent1_embed, sent2_embed, score = model(data, prior_dist = prior_dist)
             pred = (score + 0.5).floor()
             acc = accuracy_score(label.detach().cpu().numpy(), pred.detach().cpu().numpy())
             loss = Loss(sent1_embed, sent2_embed, score, label)
@@ -74,13 +97,15 @@ def train():
     # load data
     print('loading data...')
     datalist = load_data(args.datapath)
-    #datalist = random.sample(datalist, 1000000)
-    train, test, _, _ = train_test_split(datalist, [0]*len(datalist), random_state=0, test_size=0.1)
+    datalist = random.sample(datalist, 1000000)
+    train, test, _, _ = train_test_split(datalist, [0]*len(datalist), random_state=0, test_size=0.01)
     print('building dataloader...')
     train_dataloader = get_loader(train, args.train_batch_size)
     test_dataloader = get_loader(test, args.test_batch_size)
 
+
     # get label_ids
+    label_ids = None
     tokenizer = get_tokenizer(args.model_name)
     tag_mapping = load_tag_mapping(args.labelpath)
     label_ids = get_label_ids(tokenizer, tag_mapping)
@@ -103,6 +128,13 @@ def train():
     # loss
     Loss = MTBLoss()
 
+    prior_dist = None
+    test_prior_dist = None
+
+    # print('get prior distribution')
+    # prior_dist = get_prior_distribution(model, datalist)
+
+
     train_loss = []
     test_loss = []
     step = 0
@@ -118,7 +150,7 @@ def train():
         for data, label in tqdm(train_dataloader):
             #try:
             label = label.to(device)
-            sent1_embed, sent2_embed, score = model(data)
+            sent1_embed, sent2_embed, score = model(data, prior_dist = prior_dist)
             #print(score)
             pred = (score + 0.5).floor()
             acc = accuracy_score(label.detach().cpu().numpy(), pred.detach().cpu().numpy())
@@ -146,11 +178,23 @@ def train():
                 train_step_acc = []
                 torch.cuda.empty_cache()
 
+                # update prior distribution
+                # print('update prior distribution')
+                # prior_dist = get_prior_distribution(model, datalist)
+                model.train()
+
             if step % args.eval_step == 0:
                 train_loss.append(np.mean(train_step_loss))
-                loss = evaluate(model, step, test_dataloader, Loss)
+
+                # print('get prior distribution')
+                # test_prior_dist = get_prior_distribution(model, test)
+
+                loss = evaluate(model, step, test_dataloader, Loss, prior_dist = test_prior_dist)
+
                 test_loss.append(loss)
                 model.train()
+
+
 
     np.save(model_save_path + '/train_loss.npy', np.array(train_loss))
     np.save(model_save_path + '/test_loss.npy', np.array(test_loss))

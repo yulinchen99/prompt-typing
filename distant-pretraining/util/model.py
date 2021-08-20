@@ -10,49 +10,54 @@ random.seed(0)
 def normalize(data):
     return torch.nn.functional.normalize(data, dim=1)
 
+def js_div(p, q):
+    kldiv = nn.KLDivLoss(reduction='none')
+    log_mean = ((p+q) / 2).log()
+    sim = (kldiv(log_mean, p)+kldiv(log_mean, q)) / 2
+    sim = sim.sum(1)
+    return sim
+
 class PretrainModel(nn.Module):
-    def __init__(self, model_name, alpha=0.7, blank_token='[BLANK]', device='cuda:0', label_ids=None):
+    def __init__(self, model_name, alpha=0.4, blank_token='[BLANK]', sep_token=['In', 'this', 'sentence', ','], prompt_tokens=['is', 'a'], device='cuda:0', label_ids=None):
         nn.Module.__init__(self)
-        config = AutoConfig.from_pretrained(model_name)
-        if isinstance(config, RobertaConfig):
-            self.model = RobertaForMaskedLM.from_pretrained(model_name)
-            self.tokenizer = RobertaTokenizer.from_pretrained(model_name)
+        #config = AutoConfig.from_pretrained(model_name,  local_files_only = True)
+        #if isinstance(config, RobertaConfig):
+        #    self.model = RobertaForMaskedLM.from_pretrained(model_name)
+        #    self.tokenizer = RobertaTokenizer.from_pretrained(model_name)
             #self.word_embedding = self.model.roberta.get_input_embeddings()
-        elif isinstance(config, BertConfig):
-            self.model = BertForMaskedLM.from_pretrained(model_name)
-            self.tokenizer = BertTokenizer.from_pretrained(model_name)
+        #elif isinstance(config, BertConfig):
+        self.model = BertForMaskedLM.from_pretrained(model_name, local_files_only = True)
+        self.tokenizer = BertTokenizer.from_pretrained(model_name,  local_files_only = True)
             #self.word_embedding = self.model.bert.get_input_embeddings()
-        elif isinstance(config, GPT2Config):
-            self.model = GPT2LMHeadModel.from_pretrained(model_name)
-            self.tokenizer = GPT2Tokenizer.from_pretrained(model_name)
-        else:
-            print('unsupported model name')
-            raise ValueError
+        #elif isinstance(config, GPT2Config):
+        #    self.model = GPT2LMHeadModel.from_pretrained(model_name)
+        #    self.tokenizer = GPT2Tokenizer.from_pretrained(model_name)
+        #else:
+        #    print('unsupported model name')
+        #    raise ValueError
         self.alpha = alpha
         self.blank_token = blank_token
+        self.sep_token = sep_token
+        self.prompt_tokens = prompt_tokens
         self.device = device
 
-        num_added_tokens = self.tokenizer.add_tokens([self.blank_token])
-        self.model.resize_token_embeddings(config.vocab_size + num_added_tokens)
+        self.tokenizer.add_tokens([self.blank_token] + self.sep_token + self.prompt_tokens)
+        self.model.resize_token_embeddings(len(self.tokenizer))
         if 'cuda' in device:
             self.model = nn.DataParallel(self.model)
 
         self.label_ids = label_ids
+        if self.label_ids is None:
+            print('no label_ids, use hidden_state!')
 
     def get_prompt_sentence(self, sent, pos, entity_name):
         # replace entities
+        entity = entity_name.split(' ')
         prob = random.random()
         if prob < self.alpha:
-            new_sent = sent[:pos[0]] + [self.blank_token] + sent[pos[-1]+1:]
-            new_sent += [self.blank_token]
-        else:
-            new_sent = sent + entity_name.split(' ')
+            entity = [self.blank_token]
 
-        # prompt
-        new_sent += ['is']
-        if not isinstance(self.tokenizer, GPT2Tokenizer):
-            new_sent = new_sent + [self.tokenizer.mask_token]
-        
+        new_sent = sent[:pos[0]] + entity + sent[pos[-1]+1:] + self.sep_token + entity + self.prompt_tokens + [self.tokenizer.mask_token]      
         return new_sent
 
     
@@ -115,25 +120,48 @@ class PretrainModel(nn.Module):
         else:
             self.model.from_pretrained(load_path)
 
+    def get_prior_distribution(self, inputs):
+        sent1_input, sent1_mask = self.tokenize(inputs['sent1'], inputs['pos1'], inputs['entity_name'])
+        sent2_input, sent2_mask = self.tokenize(inputs['sent2'], inputs['pos2'], inputs['entity_name'])
+        sent1_logits = self.get_mask_logits(sent1_input, sent1_mask)
+        sent2_logits = self.get_mask_logits(sent2_input, sent2_mask)
+        sent1_tag_dist = F.softmax(sent1_logits, dim=1)
+        sent2_tag_dist = F.softmax(sent2_logits, dim=1)
+        tag_dist = torch.cat([sent1_tag_dist, sent2_tag_dist], dim=0)
+        return tag_dist
 
-    
-    def forward(self, inputs):
+
+    def forward(self, inputs, prior_dist = None):
         # inputs:{'sent1':List[List[str]], 'sent2':List[List[str]], 
         #'pos1': List[List[int]], 'pos2': List[List[int]], 'entity_name':str}
         sent1_input, sent1_mask = self.tokenize(inputs['sent1'], inputs['pos1'], inputs['entity_name'])
         sent2_input, sent2_mask = self.tokenize(inputs['sent2'], inputs['pos2'], inputs['entity_name'])
-        if not self.label_ids:
+        if self.label_ids is None:
             sent1_hidden_state = self.get_mask_hidden_state(sent1_input, sent1_mask)
             sent2_hidden_state = self.get_mask_hidden_state(sent2_input, sent2_mask)
         else:
-            sent1_hidden_state = self.get_mask_logits(sent1_input, sent1_mask)
-            sent2_hidden_state = self.get_mask_logits(sent2_input, sent2_mask)
+            sent1_logits = self.get_mask_logits(sent1_input, sent1_mask)
+            sent2_logits = self.get_mask_logits(sent2_input, sent2_mask)
+            sent1_hidden_state = F.softmax(sent1_logits, dim=1)
+            sent2_hidden_state = F.softmax(sent2_logits, dim=1)
+        if prior_dist is not None:
+            sent1_hidden_state = sent1_hidden_state / prior_dist
+            sent2_hidden_state = sent2_hidden_state / prior_dist
+            sent1_hidden_state = F.softmax(sent1_hidden_state, dim=1)
+            sent2_hidden_state = F.softmax(sent2_hidden_state, dim=1)
+
+            #sent1_hidden_state, sent2_hidden_state = self.select_top_states(sent1_logits, sent2_logits)
             #print(sent1_hidden_state.shape)
         # compute score
-        score = F.cosine_similarity(sent1_hidden_state, sent2_hidden_state)
+        if self.label_ids is None:
+            p = F.cosine_similarity(sent1_hidden_state, sent2_hidden_state)
+            p = 0.5 + 0.5 * p
+        else:
+            p = js_div(sent1_hidden_state, sent2_hidden_state) # [0, 1] larger number indicates less similarity
+            p = 1 - p
+            # p = torch.diag(torch.matmul(sent1_hidden_state, sent2_hidden_state.T))
         #print(score)
-        #p = 1.0 - 1.0 / (1.0 + torch.exp(score))
-        p = 0.5 + 0.5 * score
+        # p = 1.0 - 1.0 / (1.0 + torch.exp(score))
         return sent1_hidden_state, sent2_hidden_state, p
 
 
@@ -143,4 +171,5 @@ class MTBLoss(nn.Module):
 
     def forward(self, sent1_embed, sent2_embed, p, labels):
         loss = torch.sum(torch.mul(labels, torch.log(p+1e-6)) + torch.mul((1-labels), torch.log(1-p+1e-6)))
+        assert torch.isnan(loss).sum() == 0, print(torch.log(p+1e-6))
         return - loss / sent1_embed.size(0)

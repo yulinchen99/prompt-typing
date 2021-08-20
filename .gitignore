@@ -111,3 +111,6 @@ test-result/
 *.log
 *.slurm
 *.json
+*.csv
+*.txt
+*.zip

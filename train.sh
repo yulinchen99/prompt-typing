@@ -1,21 +1,21 @@
 data='ontonote'
 highlight_entity='<ENTITY>-</ENTITY>'
 # soft-prompt
-prompt='soft'
+prompt='soft1'
 # hard-prompt
-#prompt='hard'
+#prompt='hard1'
 
 # baseline BERT-CLS
-python -u train.py --model baseline --model_name roberta-base --data $data --highlight_entity $highlight_entity --lr 1e-5
+python -u train.py --model baseline --model_name bert-base-cased --data $data --highlight_entity $highlight_entity --lr 5e-5 --usecls
 
-# baseline 10% train data
-python -u train.py --model baseline --model_name roberta-base --data $data --highlight_entity $highlight_entity --lr 1e-5 --sample_rate 0.1
+# baseline 1 shot train data
+python -u train.py --model baseline --model_name bert-base-cased --data $data --highlight_entity $highlight_entity --lr 5e-5 --sample_num 1 --usecls
 
 # prompt model
-python -u train.py --model maskedlm --model_name roberta-base --data $data --prompt $prompt  --lr 1e-5
+python -u train.py --model maskedlm --model_name bert-base-cased --data $data --prompt $prompt  --lr 5e-5
 
-# 10% train data
-python -u train.py --model maskedlm --model_name roberta-base --data $data --prompt $prompt  --lr 1e-5 --sample_rate 0.1
+# 1 shot train data
+python -u train.py --model maskedlm --model_name bert-base-cased --data $data --prompt $prompt  --lr 5e-5 --sample_num 1
 
 # test only
 # python -u train.py --model maskedlm --model_name roberta-base --data $data --prompt $prompt --test_only --load_ckpt ...
