@@ -1,4 +1,5 @@
 data='ontonote'
+echo data
 highlight_entity='<ENTITY>-</ENTITY>'
 # soft-prompt
 prompt='soft1'
@@ -17,5 +18,3 @@ python -u train.py --model maskedlm --model_name bert-base-cased --data $data --
 # 1 shot train data
 python -u train.py --model maskedlm --model_name bert-base-cased --data $data --prompt $prompt  --lr 5e-5 --sample_num 1
 
-# test only
-# python -u train.py --model maskedlm --model_name roberta-base --data $data --prompt $prompt --test_only --load_ckpt ...

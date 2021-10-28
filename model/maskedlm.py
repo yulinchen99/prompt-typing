@@ -50,14 +50,14 @@ class Prompt:
 class EntityTypingModel(nn.Module):
     def __init__(self, model_name, idx2tag, tag_list, prompt_mode):
         nn.Module.__init__(self)
-        config = AutoConfig.from_pretrained(model_name)
+        config = AutoConfig.from_pretrained(os.path.join(model_name, 'config.json'))
         if isinstance(config, RobertaConfig):
             self.model = RobertaForMaskedLM.from_pretrained(model_name)
             self.tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
             #self.word_embedding = self.model.roberta.get_input_embeddings()
         elif isinstance(config, BertConfig):
             self.model = BertForMaskedLM.from_pretrained(model_name)
-            self.tokenizer = BertTokenizer.from_pretrained('bert-base-cased')
+            self.tokenizer = BertTokenizer.from_pretrained('/mnt/sfs_turbo/cyl/ner-mlm/bert')
             #self.word_embedding = self.model.bert.get_input_embeddings()
         elif isinstance(config, GPT2Config):
             self.model = GPT2LMHeadModel.from_pretrained(model_name)

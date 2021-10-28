@@ -29,16 +29,16 @@ def get_tag2inputid(tokenizer, splitted_tag):
 
 def get_tokenizer(model_name):
     tokenizer = None
-    config = AutoConfig.from_pretrained(model_name)
-    if isinstance(config, RobertaConfig):
-        tokenizer = RobertaTokenizer.from_pretrained(model_name)
-    elif isinstance(config, BertConfig):
-        tokenizer = BertTokenizer.from_pretrained(model_name)
-    elif isinstance(config, GPT2Config):
-        tokenizer = GPT2Tokenizer.from_pretrained(model_name)
-    else:
-        print('unsupported model name')
-        raise ValueError
+    #config = AutoConfig.from_pretrained(model_name,  local_files_only = True)
+    #if isinstance(config, RobertaConfig):
+    #    tokenizer = RobertaTokenizer.from_pretrained(model_name)
+    #elif isinstance(config, BertConfig):
+    tokenizer = BertTokenizer.from_pretrained(model_name,  local_files_only = True)
+    #elif isinstance(config, GPT2Config):
+    #    tokenizer = GPT2Tokenizer.from_pretrained(model_name)
+    #else:
+    #    print('unsupported model name')
+    #    raise ValueError
     return tokenizer
 
 class ResultLog:

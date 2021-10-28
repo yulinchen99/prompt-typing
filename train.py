@@ -55,6 +55,7 @@ def main():
     parser.add_argument('--val_step', type=int, default=2000, help='val every x steps of training')
     parser.add_argument('--val_iter', type=int, default=None, help='val iter')
     parser.add_argument('--save_dir', type=str, default='checkpoint')
+    parser.add_argument('--result_save_dir', type=str, default='result')
     parser.add_argument('--test_only', action='store_true', default=False)
     parser.add_argument('--load_ckpt', type=str, default=None)
     parser.add_argument('--ckpt_name', type=str, default=None)
@@ -101,8 +102,8 @@ def main():
 
     # if args.dual_optim and args.model == 'maskedlm':
         # MODEL_SAVE_PATH += '-dual_optim'
-    if not os.path.exists(args.save_dir):
-        os.mkdir(args.save_dir)
+    if not os.path.exists(os.path.join(main_dir, args.save_dir)):
+        os.mkdir(os.path.join(main_dir, args.save_dir))
     args.model_save_path = MODEL_SAVE_PATH
     print('modelsave path:', MODEL_SAVE_PATH)
     
@@ -160,7 +161,7 @@ def main():
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_step, num_training_steps=global_train_iter)
 
     # result log saving path
-    result_save_dir = os.path.join(main_dir, 'result/')
+    result_save_dir = os.path.join(main_dir, args.result_save_dir)
     if not os.path.exists(result_save_dir):
         os.mkdir(result_save_dir)
     now = datetime.datetime.now().strftime("%Y-%m-%d-%H:%M:%S")

@@ -4,6 +4,7 @@ import torch
 from transformers import AutoConfig, RobertaConfig, BertConfig, RobertaForMaskedLM, BertForMaskedLM, RobertaTokenizer, BertTokenizer, GPT2Config, GPT2Tokenizer, GPT2LMHeadModel
 import numpy as np
 import torch.nn.functional as F
+from distance_metric import js_div, ws_dis
 
 random.seed(0)
 
@@ -130,7 +131,6 @@ class PretrainModel(nn.Module):
         tag_dist = torch.cat([sent1_tag_dist, sent2_tag_dist], dim=0)
         return tag_dist
 
-
     def forward(self, inputs, prior_dist = None):
         # inputs:{'sent1':List[List[str]], 'sent2':List[List[str]], 
         #'pos1': List[List[int]], 'pos2': List[List[int]], 'entity_name':str}
@@ -157,11 +157,9 @@ class PretrainModel(nn.Module):
             p = F.cosine_similarity(sent1_hidden_state, sent2_hidden_state)
             p = 0.5 + 0.5 * p
         else:
-            p = js_div(sent1_hidden_state, sent2_hidden_state) # [0, 1] larger number indicates less similarity
+            # p = js_div(sent1_hidden_state, sent2_hidden_state) # [0, 1] larger number indicates less similarity
+            p = ws_dis(sent1_hidden_state, sent2_hidden_state)
             p = 1 - p
-            # p = torch.diag(torch.matmul(sent1_hidden_state, sent2_hidden_state.T))
-        #print(score)
-        # p = 1.0 - 1.0 / (1.0 + torch.exp(score))
         return sent1_hidden_state, sent2_hidden_state, p
 
 

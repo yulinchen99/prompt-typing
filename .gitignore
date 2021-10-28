@@ -106,7 +106,7 @@ checkpoint/
 .vscode/
 result/
 *.out
-*deprecated.py
+*deprecated.*
 test-result/
 *.log
 *.slurm
@@ -114,3 +114,6 @@ test-result/
 *.csv
 *.txt
 *.zip
+distant-pretraining/data
+!distant-pretraining/data/*.sh
+!distant-pretraining/data/train_data_gen.py

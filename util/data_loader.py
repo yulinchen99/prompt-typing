@@ -6,7 +6,6 @@ import numpy as np
 # from word_encoder import BERTWordEncoder
 
 import random
-random.seed(0)
 
 def sample_by_ratio(datalist, ratio):
     sample_num = max(1, int(len(datalist)*ratio+0.5)) # at least one

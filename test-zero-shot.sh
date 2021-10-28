@@ -7,5 +7,9 @@
 # zero shot test on semi-supervised pretrained model
 python -u train.py --model maskedlm --data fewnerd --prompt hard3  --test_only --model_name distant-pretraining/result/bert-base-cased-2e-05/5000
 
+# python -u /mnt/sfs_turbo/cyl/ner-mlm/train.py --model maskedlm --data $data --prompt hard3  --test_only --model_name /mnt/sfs_turbo/cyl/ner-mlm/distant-pretraining/result/bert-$data-2e-05-jsdiv/10000
+
+# python -u /mnt/sfs_turbo/cyl/ner-mlm/train.py --model maskedlm --data $data --prompt hard3  --test_only --model_name /mnt/sfs_turbo/cyl/ner-mlm/distant-pretraining/result/bert-$data-2e-05-jsdiv/15000
+# done
 # zero shot test on bert-base-cased
 #python -u train.py --model maskedlm --data fewnerd --prompt hard3  --test_only --model_name bert-base-cased

@@ -41,7 +41,7 @@ class EntityTypingModel(nn.Module):
             tag_score = torch.stack(tag_score)
             tag_score = self.linear(tag_score)
         else:
-            tag_score = self.linear(output.pooler_output)
+            tag_score = self.linear(output.last_hidden_state[:,0,:])
         return tag_score
 
     def forward(self, inputs, use_sep=True):
