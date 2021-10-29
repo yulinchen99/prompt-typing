@@ -4,7 +4,7 @@ import torch
 from transformers import AutoConfig, RobertaConfig, BertConfig, RobertaForMaskedLM, BertForMaskedLM, RobertaTokenizer, BertTokenizer, GPT2Config, GPT2Tokenizer, GPT2LMHeadModel
 import numpy as np
 import torch.nn.functional as F
-from distance_metric import js_div, ws_dis
+from .distance_metric import js_div, ws_dis
 
 random.seed(0)
 
@@ -27,8 +27,8 @@ class PretrainModel(nn.Module):
         #    self.tokenizer = RobertaTokenizer.from_pretrained(model_name)
             #self.word_embedding = self.model.roberta.get_input_embeddings()
         #elif isinstance(config, BertConfig):
-        self.model = BertForMaskedLM.from_pretrained(model_name, local_files_only = True)
-        self.tokenizer = BertTokenizer.from_pretrained(model_name,  local_files_only = True)
+        self.model = BertForMaskedLM.from_pretrained(model_name)
+        self.tokenizer = BertTokenizer.from_pretrained(model_name)
             #self.word_embedding = self.model.bert.get_input_embeddings()
         #elif isinstance(config, GPT2Config):
         #    self.model = GPT2LMHeadModel.from_pretrained(model_name)
@@ -74,7 +74,7 @@ class PretrainModel(nn.Module):
         return tokenized_sent['input_ids'].to(self.device), tokenized_sent['attention_mask'].to(self.device)
 
     def get_mask_logits(self, input_ids, attention_mask):
-        output = self.model(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
+        output = self.model(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True, return_dict=True)
         pred_pos = -2 # the token position for token prediction
 
         if isinstance(self.tokenizer, GPT2Tokenizer):
@@ -159,7 +159,8 @@ class PretrainModel(nn.Module):
         else:
             # p = js_div(sent1_hidden_state, sent2_hidden_state) # [0, 1] larger number indicates less similarity
             p = ws_dis(sent1_hidden_state, sent2_hidden_state)
-            p = 1 - p
+            p = p / (1+p)
+            p = 1-p
         return sent1_hidden_state, sent2_hidden_state, p
 
 
@@ -169,5 +170,10 @@ class MTBLoss(nn.Module):
 
     def forward(self, sent1_embed, sent2_embed, p, labels):
         loss = torch.sum(torch.mul(labels, torch.log(p+1e-6)) + torch.mul((1-labels), torch.log(1-p+1e-6)))
-        assert torch.isnan(loss).sum() == 0, print(torch.log(p+1e-6))
+        # assert torch.isnan(loss).sum() == 0, print(torch.log(p+1e-6))
         return - loss / sent1_embed.size(0)
+    
+    # def forward(self, sent1_embed, sent2_embed, p, labels):
+    #     loss = torch.sum(torch.mul(labels, torch.log(p+1e-6)) - torch.mul((1-labels), torch.log(p+1e-6)))
+    #     # assert torch.isnan(loss).sum() == 0, print(torch.log(p+1e-6))
+    #     return - loss / sent1_embed.size(0)

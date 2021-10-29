@@ -33,7 +33,7 @@ def get_tokenizer(model_name):
     #if isinstance(config, RobertaConfig):
     #    tokenizer = RobertaTokenizer.from_pretrained(model_name)
     #elif isinstance(config, BertConfig):
-    tokenizer = BertTokenizer.from_pretrained(model_name,  local_files_only = True)
+    tokenizer = BertTokenizer.from_pretrained(model_name)
     #elif isinstance(config, GPT2Config):
     #    tokenizer = GPT2Tokenizer.from_pretrained(model_name)
     #else:
@@ -93,10 +93,3 @@ class PartialLabelLoss(nn.Module):
             loss -= score[i][label[i]]
         loss = loss / label.size(0)
         return loss
-'''
-import torch
-score = torch.LongTensor([[1.0,2.0,3.0],[1.0,2.0,3.0],[1.0,2.0,3.0]])
-label = torch.LongTensor([0,1,2])
-loss = PartialLabelLoss()
-print(loss(score, label))
-'''
