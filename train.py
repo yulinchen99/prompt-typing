@@ -1,10 +1,11 @@
 import sys
 import argparse
+from tkinter.filedialog import Open
 from transformers import BertConfig, RobertaConfig
-from util.data_loader import get_loader, EntityTypingDataset
+from util.data_loader import get_loader, EntityTypingDataset, OpenEntityDataset
 from model.baseline import EntityTypingModel as BaselineModel
 from model.maskedlm import EntityTypingModel as MaskedLM
-from util.util import load_tag_mapping, get_tag2inputid, get_tag_list, ResultLog, get_tokenizer, PartialLabelLoss
+from util.util import load_tag_mapping, get_tag2inputid, get_tag_list, ResultLog, get_tokenizer, PartialLabelLoss, MultiLabelLoss, get_output_index
 import torch.nn as nn
 from torch.optim import AdamW, lr_scheduler
 from sklearn.metrics import accuracy_score
@@ -16,7 +17,7 @@ import warnings
 from transformers import get_linear_schedule_with_warmup
 import os
 import datetime
-from util.metrics import get_metrics
+from util.metrics import get_metrics, get_openentity_metrics
 import torch.nn.functional as F
 import pandas as pd
 #from memory_profiler import profile
@@ -41,7 +42,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--model_name', type=str, default='roberta-base', help='bert-base-cased, roberta-base, and gpt2 are supported, or a pretrained model save path')
-    parser.add_argument('--max_length', type=int, default=64)
+    parser.add_argument('--max_length', type=int, default=128)
     parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--val_batch_size', type=int, default=32)
     parser.add_argument('--data', type=str, default='ontonote', help='ontonote, fewnerd or bbn')
@@ -85,8 +86,9 @@ def main():
     # main_dir = '/mnt/sfs_turbo/cyl/ner-mlm/'
     main_dir = sys.path[0] + '/'
     IS_FEWNERD=args.data=='fewnerd'
-    if IS_FEWNERD:
-        print('is fewnerd')
+    if args.data == "openentity":
+        args.loss = "multi_label"
+
     args.data = os.path.join(main_dir + 'data', args.data)
     print('data path:', args.data)
 
@@ -128,23 +130,29 @@ def main():
     # initialize model
     print('initializing model...')
     if args.model == 'baseline':
-        model = BaselineModel(args.model_name, idx2tag, mapped_tag_list, out_dim, highlight_entity=HIGHLIGHT_ENTITY, dropout=args.dropout, usecls=args.usecls)
+        model = BaselineModel(args.model_name, idx2tag, mapped_tag_list, out_dim, highlight_entity=HIGHLIGHT_ENTITY, dropout=args.dropout, usecls=args.usecls, max_length=args.max_length)
     elif args.model == 'maskedlm':
-        model = MaskedLM(args.model_name, idx2tag, mapped_tag_list, prompt_mode=args.prompt)
+        model = MaskedLM(args.model_name, idx2tag, mapped_tag_list, prompt_mode=args.prompt, max_length=args.max_length)
     else:
         raise NotImplementedError
     model = model.cuda()
 
     # initialize dataloader
     print(f'initializing data from {args.data}...')
-    train_dataset = EntityTypingDataset(args.data, 'train', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY, sample_num=args.sample_num)
+    if "openentity" in args.data:
+        train_dataset = OpenEntityDataset(args.data, 'train', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY, sample_num=args.sample_num)
+        val_dataset = OpenEntityDataset(args.data, 'dev', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
+        test_dataset = OpenEntityDataset(args.data, 'test', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
+    else:
+        train_dataset = EntityTypingDataset(args.data, 'train', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY, sample_num=args.sample_num)
+        val_dataset = EntityTypingDataset(args.data, 'dev', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
+        test_dataset = EntityTypingDataset(args.data, 'test', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
+
     train_dataloader = get_loader(train_dataset, args.batch_size)
-    val_dataset = EntityTypingDataset(args.data, 'dev', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
     if args.sample_num is not None and len(train_dataset) < len(val_dataset):
         val_dataset, _ = torch.utils.data.random_split(val_dataset, [len(train_dataset), len(val_dataset)-len(train_dataset)], generator=torch.Generator().manual_seed(0))
     print('val dataset length ', len(val_dataset))
     val_dataloader = get_loader(val_dataset, args.val_batch_size)
-    test_dataset = EntityTypingDataset(args.data, 'test', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
     test_dataloader = get_loader(test_dataset, args.val_batch_size)
 
     # initialize loss
@@ -152,6 +160,8 @@ def main():
         Loss = nn.CrossEntropyLoss()
     elif args.loss == 'partial':
         Loss = PartialLabelLoss()
+    elif args.loss == "multi_label":
+        Loss = MultiLabelLoss()
     else:
         assert False, print(f'invalid loss {args.loss}!')
 
@@ -201,9 +211,19 @@ def main():
                 loss = Loss(tag_score, data['labels'])
                 loss.backward()
 
-                tag_pred = torch.argmax(tag_score, dim=1)
+                if args.loss == "multi_label":
+                    tag_pred = get_output_index(tag_score)
+                else: 
+                    tag_pred = torch.argmax(tag_score, dim=1).cpu().numpy().tolist()
+
                 del tag_score
-                acc, _, _ = get_metrics(data['labels'].cpu().numpy().tolist(), tag_pred.cpu().numpy().tolist(), idx2oritag, isfewnerd=IS_FEWNERD)
+                labels = data['labels']
+                if isinstance(labels, torch.Tensor):
+                    labels = labels.cpu().numpy().tolist()
+                if args.loss == "multi_label":
+                    acc, _, _ = get_openentity_metrics(labels, tag_pred, idx2oritag)
+                else:
+                    acc, _, _ = get_metrics(labels, tag_pred, idx2oritag, isfewnerd=IS_FEWNERD)
 
                 train_step_acc.append(acc)
                 train_step_loss.append(loss.item())
@@ -235,9 +255,15 @@ def main():
                         for data in val_dataloader:
                             to_cuda(data)
                             tag_score = model(data)
-                            tag_pred = torch.argmax(tag_score, dim=1)
-                            y_pred += tag_pred.cpu().numpy().tolist()
-                            y_true += data['labels'].cpu().numpy().tolist()
+                            if args.loss == "multi_label":
+                                tag_pred = get_output_index(tag_score)
+                            else: 
+                                tag_pred = torch.argmax(tag_score, dim=1).cpu().numpy().tolist()
+                            y_pred += tag_pred
+                            labels = data['labels']
+                            if isinstance(labels, torch.Tensor):
+                                labels = labels.cpu().numpy().tolist()
+                            y_true += labels
                             #acc = accuracy_score(data['labels'].cpu().numpy(), tag_pred.cpu().numpy())
                             #step_val_acc.append(acc)
 
@@ -246,7 +272,11 @@ def main():
                                 break
 
                         #val_acc = np.mean(step_val_acc)
-                        val_acc, val_micro, val_macro = get_metrics(y_true, y_pred, idx2oritag, isfewnerd=IS_FEWNERD)
+                        # val_acc, val_micro, val_macro = get_metrics(y_true, y_pred, idx2oritag, isfewnerd=IS_FEWNERD)
+                        if args.loss == "multi_label":
+                            val_acc, val_micro, val_macro = get_openentity_metrics(y_true, y_pred, idx2oritag)
+                        else:
+                            val_acc, val_micro, val_macro = get_metrics(y_true, y_pred, idx2oritag, isfewnerd=IS_FEWNERD)
                         print('[STEP %d EVAL RESULT] accuracy: %.4f%%, micro:%s, \
                             macro:%s' % (step, val_acc*100, str(val_micro), str(val_macro)))
 
@@ -315,9 +345,16 @@ def main():
             if prior_dist is not None:
                 tag_score = F.softmax(tag_score) / prior_dist
 
-            tag_pred = torch.argmax(tag_score, dim=1)
-            y_pred += tag_pred.cpu().numpy().tolist()
-            y_true += data['labels'].cpu().numpy().tolist()
+            if args.loss == "multi_label":
+                tag_pred = get_output_index(tag_score)
+            else: 
+                tag_pred = torch.argmax(tag_score, dim=1).cpu().numpy().tolist()
+
+            y_pred += tag_pred
+            labels = data['labels']
+            if isinstance(labels, torch.Tensor):
+                labels = labels.cpu().numpy().tolist()
+            y_true += labels
         #acc = accuracy_score(y_true, y_pred)
         if 'ontonote' in args.data:
             y_true = torch.LongTensor(y_true)
@@ -328,7 +365,11 @@ def main():
             y_pred = y_pred.numpy().tolist()
         print(y_true[:100])
         print(y_pred[:100])
-        acc, micro, macro = get_metrics(y_true, y_pred, idx2oritag, isfewnerd=IS_FEWNERD)
+        if args.loss == "multi_label":
+            acc, micro, macro = get_openentity_metrics(y_true, y_pred, idx2oritag)
+        else:
+            acc, micro, macro = get_metrics(y_true, y_pred, idx2oritag, isfewnerd=IS_FEWNERD)
+        # acc, micro, macro = get_metrics(y_true, y_pred, idx2oritag, isfewnerd=IS_FEWNERD)
         resultlog.update('test_acc', {'acc':acc, 'micro':micro, 'macro':macro})
         print('[TEST RESULT] accuracy: %.4f%%, micro:%s, macro:%s' % (acc*100, str(micro), str(macro)))
 

@@ -6,6 +6,10 @@ import numpy as np
 # from word_encoder import BERTWordEncoder
 
 import random
+import json
+
+from util.fewshotsampler import FewshotSampler
+from tqdm import tqdm
 
 def sample_by_ratio(datalist, ratio):
     sample_num = max(1, int(len(datalist)*ratio+0.5)) # at least one
@@ -37,10 +41,7 @@ class EntityTypingDataset(data.Dataset):
     Fewshot NER Dataset
     """
     def __init__(self, datadir, mode, max_length, tag2idx, tag_mapping, highlight_entity=None, sample_num=None):
-        filepath = os.path.join(datadir, f'{mode}.txt')
-        if not os.path.exists(filepath):
-            print(f"[ERROR] Data file {filepath} does not exist!")
-            assert(0)
+        filepath = self._get_filepath(datadir, mode)
         self.samples = []
         self.max_length = max_length
         self.tag2id = tag2idx
@@ -50,6 +51,8 @@ class EntityTypingDataset(data.Dataset):
         self.__load_data_from_file__(filepath)
         self.__sample_data__()
 
+    def _get_filepath(self, datadir, mode):
+        return os.path.join(datadir, f'{mode}.txt')
 
     def __sample_data__(self):
         if self.sample_num is None:
@@ -66,6 +69,9 @@ class EntityTypingDataset(data.Dataset):
         self.samples = [sample for sample_list in list(sample_group.values()) for sample in sample_list]
     
     def __load_data_from_file__(self, filepath):
+        if not os.path.exists(filepath):
+            print(f"[ERROR] Data file {filepath} does not exist!")
+            assert(0)
         with open(filepath, 'r', encoding='utf-8')as f:
             lines = f.readlines()
         for line in lines:
@@ -81,7 +87,7 @@ class EntityTypingDataset(data.Dataset):
             if sample.valid(self.max_length):
                 self.samples.append(sample)
             
-            # add <ENTITY> </ENTITY> 
+        # add <ENTITY> </ENTITY> 
         if self.highlight_entity:
             for sample in self.samples:
                 sample.highlight(self.highlight_entity)
@@ -93,13 +99,62 @@ class EntityTypingDataset(data.Dataset):
     def __len__(self):
         return len(self.samples)
 
+class OESample(Sample):
+    def get_class_count(self):
+        return dict(zip(self.tag, [1]*len(self.tag)))
+
+class OpenEntityDataset(EntityTypingDataset):
+    def __load_data_from_file__(self, filepath):
+        for file in filepath:
+            if not os.path.exists(file):
+                print(f"[ERROR] Data file {filepath} does not exist!")
+                assert(0)
+            with open(file, 'r', encoding='utf-8')as f:
+                lines = f.readlines()
+            for line in tqdm(lines, desc="load"):
+                d = json.loads(line)
+                tag = [self.tag_mapping.get(t, None) for t in d["y_str"]]
+                if not all(tag):
+                    continue
+                start = len(d["left_context_token"])
+                mention = d["mention_span"].split(" ")
+                end = start + len(mention)
+                label = [self.tag2id[t] for t in tag]
+                words = d["left_context_token"] + mention + d["right_context_token"]
+                sample = OESample(words, tag, label, (start, end))
+                if sample.valid(self.max_length):
+                    self.samples.append(sample)
+            
+        # add <ENTITY> </ENTITY> 
+        if self.highlight_entity:
+            for sample in self.samples:
+                sample.highlight(self.highlight_entity)
+        
+        print(f"{len(self.samples)} samples loaded.")
+        
+    def _get_filepath(self, datadir, mode):
+        if mode == "test":
+            return [os.path.join(datadir, f'{mode}.json')]
+        else:
+            return [os.path.join(datadir, f'{mode}.json'), os.path.join(datadir, f"el_{mode}.json"), os.path.join(datadir, f"headword_{mode}.json")]
+
+    
+    def __sample_data__(self):
+        if self.sample_num is None:
+            return
+        # for each type of entity, sample by sample_num
+        sampler = FewshotSampler(self.sample_num, samples=self.samples)
+        sampled_idx = sampler.__next__()
+        self.samples = [self.samples[i] for i in sampled_idx]
+
 def collate_fn(samples):
     batch_data = {'words':[], 'labels':[], 'entity_pos':[]}
     for sample in samples:
         batch_data['words'].append(sample.words)
         batch_data['labels'].append(sample.label)
         batch_data['entity_pos'].append(sample.pos)
-    batch_data['labels'] = torch.LongTensor(batch_data['labels'])
+    if isinstance(batch_data['labels'][0], int):
+        batch_data['labels'] = torch.LongTensor(batch_data['labels'])
     batch_data['entity_pos'] = torch.LongTensor(batch_data['entity_pos'])
     return batch_data
 

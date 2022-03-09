@@ -64,4 +64,10 @@ def get_metrics(label, pred, idx2tag, isfewnerd=False):
     micro = loose_micro(label, pred)
     return acc, {'p':micro[0], 'r':micro[1], 'f':micro[2]}, {'p':macro[0], 'r':macro[1], 'f':macro[2]}
 
-
+def get_openentity_metrics(label, pred, idx2tag):
+    label = [[idx2tag[l] for l in la] for la in label]
+    pred = [[idx2tag[p] for p in pr] for pr in pred]
+    acc = strict(label, pred)
+    macro = loose_macro(label, pred)
+    micro = loose_micro(label, pred)
+    return acc, {'p':micro[0], 'r':micro[1], 'f':micro[2]}, {'p':macro[0], 'r':macro[1], 'f':macro[2]}

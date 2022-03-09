@@ -48,7 +48,7 @@ class Prompt:
         return newwords
 
 class EntityTypingModel(nn.Module):
-    def __init__(self, model_name, idx2tag, tag_list, prompt_mode):
+    def __init__(self, model_name, idx2tag, tag_list, prompt_mode, max_length=128):
         nn.Module.__init__(self)
         config = AutoConfig.from_pretrained(os.path.join(model_name, 'config.json'))
         if isinstance(config, RobertaConfig):
@@ -57,7 +57,7 @@ class EntityTypingModel(nn.Module):
             #self.word_embedding = self.model.roberta.get_input_embeddings()
         elif isinstance(config, BertConfig):
             self.model = BertForMaskedLM.from_pretrained(model_name)
-            self.tokenizer = BertTokenizer.from_pretrained('/mnt/sfs_turbo/cyl/ner-mlm/bert')
+            self.tokenizer = BertTokenizer.from_pretrained('bert-base-cased')
             #self.word_embedding = self.model.bert.get_input_embeddings()
         elif isinstance(config, GPT2Config):
             self.model = GPT2LMHeadModel.from_pretrained(model_name)
@@ -76,6 +76,7 @@ class EntityTypingModel(nn.Module):
         self.model = nn.DataParallel(self.model)
         self.idx2tag = idx2tag
         self.tag2inputid = get_tag2inputid(self.tokenizer, tag_list)
+        self.max_length = max_length
 
     def __get_tag_logits__(self, out_logits):
         tag_logits = []
@@ -106,6 +107,11 @@ class EntityTypingModel(nn.Module):
             cls_embed = sent_embed[0].unsqueeze(0)
             sep_embed = sent_embed[-1].unsqueeze(0)
             sent_embed = sent_embed[1:-1]
+            # pad & shorten
+            cur_len = len(cls_embed) + len(sent_embed) + len(prompt_embed) + pos[idx][1] - pos[idx][0]
+            if cur_len > self.max_length:
+                sent_embed = sent_embed[:-(cur_len - self.max_length)]
+            
             # concat embeddings
             new_embedding = torch.cat([cls_embed, sent_embed, prompt_embed[0].unsqueeze(0), sent_embed[pos[idx][0]:pos[idx][1]], prompt_embed[1:], mask_embed, sep_embed]) # (new-seq_len, embed_num)
             length.append(new_embedding.size(0))

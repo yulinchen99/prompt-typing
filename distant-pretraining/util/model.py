@@ -5,6 +5,7 @@ from transformers import AutoConfig, RobertaConfig, BertConfig, RobertaForMasked
 import numpy as np
 import torch.nn.functional as F
 from .distance_metric import js_div, ws_dis
+import geomloss
 
 random.seed(0)
 
@@ -158,8 +159,10 @@ class PretrainModel(nn.Module):
             p = 0.5 + 0.5 * p
         else:
             # p = js_div(sent1_hidden_state, sent2_hidden_state) # [0, 1] larger number indicates less similarity
-            p = ws_dis(sent1_hidden_state, sent2_hidden_state)
-            p = p / (1+p)
+            # p = ws_dis(sent1_hidden_state, sent2_hidden_state)
+            p = geomloss.SamplesLoss()(sent1_hidden_state.unsqueeze(1), sent2_hidden_state.unsqueeze(1))
+            # p = p / (1+p)
+            # print(p[:10])
             p = 1-p
         return sent1_hidden_state, sent2_hidden_state, p
 

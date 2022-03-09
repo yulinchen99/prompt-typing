@@ -3,6 +3,8 @@ import os
 import json
 from transformers import AutoConfig, RobertaConfig, BertConfig, RobertaTokenizer, BertTokenizer, GPT2Config, GPT2Tokenizer
 import torch.nn as nn
+import numpy as np
+import torch
 
 def load_tag_mapping(datadir):
     filepath = os.path.join(datadir, 'tag_mapping.txt')
@@ -104,4 +106,34 @@ class PartialLabelLoss(nn.Module):
             loss -= score[i][label[i]]
         loss = loss / label.size(0)
         return loss
-        
+
+sigmoid_fn = nn.Sigmoid()
+
+class MultiLabelLoss(nn.Module):
+    def __init__(self):
+        nn.Module.__init__(self)
+        self.loss = nn.BCELoss()
+    
+    def forward(self, score, label):
+        score = sigmoid_fn(score)
+        binary_label = torch.zeros(score.size()).to(score.device)
+        for i, la in enumerate(label):
+            binary_label[i][la] = 1
+        return self.loss(score, binary_label)
+
+def get_output_index(outputs):
+    """
+    Given outputs from the decoder, generate prediction index.
+    :param outputs:
+    :return:
+    """
+    pred_idx = []
+    outputs = sigmoid_fn(outputs).data.cpu().clone()
+    for single_dist in outputs:
+        single_dist = single_dist.numpy()
+        arg_max_ind = np.argmax(single_dist)
+        pred_id = [arg_max_ind]
+        pred_id.extend(
+            [i for i in range(len(single_dist)) if single_dist[i] > 0.5 and i != arg_max_ind])
+        pred_idx.append(pred_id)
+    return pred_idx
