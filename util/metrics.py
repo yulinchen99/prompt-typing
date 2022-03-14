@@ -1,3 +1,4 @@
+import copy
 def f1(p, r):
     if p == 0. or r == 0.:
         return 0.
@@ -64,10 +65,41 @@ def get_metrics(label, pred, idx2tag, isfewnerd=False):
     micro = loose_micro(label, pred)
     return acc, {'p':micro[0], 'r':micro[1], 'f':micro[2]}, {'p':macro[0], 'r':macro[1], 'f':macro[2]}
 
-def get_openentity_metrics(label, pred, idx2tag):
-    label = [[idx2tag[l] for l in la] for la in label]
-    pred = [[idx2tag[p] for p in pr] for pr in pred]
+def get_openentity_metrics(label, pred, idx2tag=None, string=False):
+    if not string:
+        label = [[idx2tag[l] for l in la] for la in label]
+        pred = [[idx2tag[p] for p in pr] for pr in pred]
     acc = strict(label, pred)
     macro = loose_macro(label, pred)
     micro = loose_micro(label, pred)
     return acc, {'p':micro[0], 'r':micro[1], 'f':micro[2]}, {'p':macro[0], 'r':macro[1], 'f':macro[2]}
+
+def get_openentity_metrics_for_prompt(y_true, y_pred, idx2tag, idx2oritag, oritag2idx, ori_tag_list):
+    # merge possible combinations in y_pred
+    tri_word_tags = ["chief_executive_officer", "latter_day_saints"]
+    tri_words = [w.split("_") for w in tri_word_tags]
+    merged_pr_tags = []
+    for pr in y_pred:
+        pr_tag = [idx2tag[p] for p in pr]
+        merged_pr_tag = copy.deepcopy(pr_tag)
+        for i in range(len(pr_tag)):
+            for j in range(i+1, len(pr_tag)):
+                if pr_tag[i] + "_" + pr_tag[j] in oritag2idx:
+                    merged_pr_tag.append(pr_tag[i] + "_" + pr_tag[j])
+                if pr_tag[j] + "_" + pr_tag[i] in oritag2idx:
+                    merged_pr_tag.append(pr_tag[j] + "_" + pr_tag[i])
+                if pr_tag[i] + "_of_" + pr_tag[j] in oritag2idx:
+                    merged_pr_tag.append(pr_tag[i] + "_of_" + pr_tag[j])
+                if pr_tag[j] + "_of_" + pr_tag[i] in oritag2idx:
+                    merged_pr_tag.append(pr_tag[j] + "_of_" + pr_tag[i])
+                if pr_tag[i] + "_in_" + pr_tag[j] in oritag2idx:
+                    merged_pr_tag.append(pr_tag[i] + "_in_" + pr_tag[j])
+                if pr_tag[j] + "_in_" + pr_tag[i] in oritag2idx:
+                    merged_pr_tag.append(pr_tag[j] + "_in_" + pr_tag[i])
+                for k, words in enumerate(tri_words):
+                    if all(map(lambda w:w in pr_tag, words)):
+                        merged_pr_tag.append(tri_word_tags[k])
+        merged_pr_tag = list(set(merged_pr_tag).intersection(set(ori_tag_list)))
+        merged_pr_tags.append(merged_pr_tag)
+    label = [[idx2tag[l] for l in la] for la in y_true]
+    return get_openentity_metrics(label, merged_pr_tags, string=True)

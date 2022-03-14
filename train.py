@@ -1,11 +1,10 @@
 import sys
 import argparse
-from tkinter.filedialog import Open
 from transformers import BertConfig, RobertaConfig
-from util.data_loader import get_loader, EntityTypingDataset, OpenEntityDataset
+from util.data_loader import get_loader, EntityTypingDataset, OpenEntityDataset, OpenEntityDatasetForPrompt
 from model.baseline import EntityTypingModel as BaselineModel
 from model.maskedlm import EntityTypingModel as MaskedLM
-from util.util import load_tag_mapping, get_tag2inputid, get_tag_list, ResultLog, get_tokenizer, PartialLabelLoss, MultiLabelLoss, get_output_index
+from util.util import load_tag_mapping, get_tag2inputid, load_tag_list, ResultLog, get_tokenizer, PartialLabelLoss, MultiLabelLoss, get_output_index
 import torch.nn as nn
 from torch.optim import AdamW, lr_scheduler
 from sklearn.metrics import accuracy_score
@@ -17,7 +16,7 @@ import warnings
 from transformers import get_linear_schedule_with_warmup
 import os
 import datetime
-from util.metrics import get_metrics, get_openentity_metrics
+from util.metrics import get_metrics, get_openentity_metrics, get_openentity_metrics_for_prompt
 import torch.nn.functional as F
 import pandas as pd
 #from memory_profiler import profile
@@ -51,9 +50,11 @@ def main():
     parser.add_argument('--lr', type=float, default=1e-5)
     parser.add_argument('--embed_lr', type=float, default=1e-4)
     parser.add_argument('--lr_step_size', type=int, default=200)
-    parser.add_argument('--grad_accum_step', type=int, default=10)
+    parser.add_argument('--grad_accum_step', type=int, default=1)
     parser.add_argument('--warmup_step', type=int, default=100)
     parser.add_argument('--val_step', type=int, default=2000, help='val every x steps of training')
+    parser.add_argument('--log_step', type=int, default=2000, help='log every x steps of training')
+
     parser.add_argument('--val_iter', type=int, default=None, help='val iter')
     parser.add_argument('--save_dir', type=str, default='checkpoint')
     parser.add_argument('--result_save_dir', type=str, default='result')
@@ -117,20 +118,29 @@ def main():
 
     # get tag list
     print('get tag list...')
-    tag_mapping = load_tag_mapping(args.data)
-    ori_tag_list, mapped_tag_list = get_tag_list(args.data, tag_mapping)
-    out_dim = len(mapped_tag_list)
-    tag2idx = {tag:idx for idx, tag in enumerate(mapped_tag_list)}
-    idx2tag = {idx:tag for idx, tag in enumerate(mapped_tag_list)}
-    print(tag2idx)
-    # for metrics calculation only
+    if args.model == "baseline":
+        tag_filename = "tags.txt"
+        if "openentity" in args.data:
+            tag_filename = "types.txt"
+        ori_tag_list = load_tag_list(args.data, filename=tag_filename)
+        out_dim = len(ori_tag_list)
+    elif args.model == "maskedlm":
+        ori_tag_list = load_tag_list(args.data)
+        tag_mapping = load_tag_mapping(args.data)
+        mapped_tag_list = [tag_mapping[t] for t in ori_tag_list]
+        out_dim = len(tag_mapping)
+        tag2idx = {tag:idx for idx, tag in enumerate(mapped_tag_list)}
+        idx2tag = {idx:tag for idx, tag in enumerate(mapped_tag_list)}
+
     idx2oritag = {idx:tag for idx, tag in enumerate(ori_tag_list)}
+    oritag2idx = {tag:idx for idx, tag in enumerate(ori_tag_list)}
     print(idx2oritag)
+    # print(tag2idx)
 
     # initialize model
     print('initializing model...')
     if args.model == 'baseline':
-        model = BaselineModel(args.model_name, idx2tag, mapped_tag_list, out_dim, highlight_entity=HIGHLIGHT_ENTITY, dropout=args.dropout, usecls=args.usecls, max_length=args.max_length)
+        model = BaselineModel(args.model_name, out_dim, highlight_entity=HIGHLIGHT_ENTITY, dropout=args.dropout, usecls=args.usecls, max_length=args.max_length)
     elif args.model == 'maskedlm':
         model = MaskedLM(args.model_name, idx2tag, mapped_tag_list, prompt_mode=args.prompt, max_length=args.max_length)
     else:
@@ -140,9 +150,14 @@ def main():
     # initialize dataloader
     print(f'initializing data from {args.data}...')
     if "openentity" in args.data:
-        train_dataset = OpenEntityDataset(args.data, 'train', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY, sample_num=args.sample_num)
-        val_dataset = OpenEntityDataset(args.data, 'dev', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
-        test_dataset = OpenEntityDataset(args.data, 'test', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
+        if args.model == "baseline":
+            train_dataset = OpenEntityDataset(args.data, 'train', args.max_length, oritag2idx, highlight_entity=HIGHLIGHT_ENTITY, sample_num=args.sample_num)
+            val_dataset = OpenEntityDataset(args.data, 'dev', args.max_length, oritag2idx, highlight_entity=HIGHLIGHT_ENTITY)
+            test_dataset = OpenEntityDataset(args.data, 'test', args.max_length, oritag2idx, highlight_entity=HIGHLIGHT_ENTITY)
+        else:
+            train_dataset = OpenEntityDatasetForPrompt(args.data, 'train', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY, sample_num=args.sample_num)
+            val_dataset = OpenEntityDatasetForPrompt(args.data, 'dev', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
+            test_dataset = OpenEntityDatasetForPrompt(args.data, 'test', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
     else:
         train_dataset = EntityTypingDataset(args.data, 'train', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY, sample_num=args.sample_num)
         val_dataset = EntityTypingDataset(args.data, 'dev', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
@@ -166,7 +181,15 @@ def main():
         assert False, print(f'invalid loss {args.loss}!')
 
     # initialize optimizer
-    optimizer = AdamW(model.parameters(), lr=args.lr)
+
+    param_optimizer = list(model.named_parameters())
+    no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
+    optimizer_grouped_parameters = [
+        {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
+        {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
+        ]
+
+    optimizer = AdamW(optimizer_grouped_parameters, lr=args.lr)
     global_train_iter = int(args.epoch * len(train_dataloader) / args.grad_accum_step + 0.5)
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_step, num_training_steps=global_train_iter)
 
@@ -191,7 +214,7 @@ def main():
     train_step_loss = []
     train_step_acc = []
     # best acc on val
-    best_acc = 0.0
+    best_metric = 0.0
 
     if not args.test_only:
         if args.load_ckpt is not None:
@@ -200,15 +223,19 @@ def main():
             model_dict = torch.load(load_path).state_dict()
             load_info = model.load_state_dict(model_dict)
             print(load_info)
-        print('######### start training ##########') 
+        print('######### start training ##########')
+        print("Model: {}".format(args.model))
+        print("Total training steps: {}".format(int(len(train_dataloader)*epoch)))
+        print("Learning rate: {}".format(args.lr))
+        print("Validation per steps: {}".format(args.val_step))
         for i in range(epoch):
             print(f'---------epoch {i}---------')
             model.train()
             # result for each epoch
-            for data in train_dataloader:
+            for data in tqdm(train_dataloader, desc=f"Train Epoch {i+1}"):
                 to_cuda(data)
                 tag_score = model(data)
-                loss = Loss(tag_score, data['labels'])
+                loss = Loss(tag_score, data['labels'], model_type = args.model)
                 loss.backward()
 
                 if args.loss == "multi_label":
@@ -237,7 +264,7 @@ def main():
                     scheduler.step()
                     optimizer.zero_grad()
 
-                    if step % (args.grad_accum_step*10) == 0:
+                    if step % args.log_step == 0:
                         print('[TRAIN STEP %d] loss: %.4f, accuracy: %.4f%%' % (step, np.mean(train_step_loss), np.mean(train_step_acc)*100))
                         train_step_loss = []
                         train_step_acc = []
@@ -252,7 +279,7 @@ def main():
                         y_pred = []
 
                         val_iter = 0
-                        for data in val_dataloader:
+                        for data in tqdm(val_dataloader, desc="Valid"):
                             to_cuda(data)
                             tag_score = model(data)
                             if args.loss == "multi_label":
@@ -274,16 +301,24 @@ def main():
                         #val_acc = np.mean(step_val_acc)
                         # val_acc, val_micro, val_macro = get_metrics(y_true, y_pred, idx2oritag, isfewnerd=IS_FEWNERD)
                         if args.loss == "multi_label":
-                            val_acc, val_micro, val_macro = get_openentity_metrics(y_true, y_pred, idx2oritag)
+                            if args.model == "baseline":
+                                val_acc, val_micro, val_macro = get_openentity_metrics(y_true, y_pred, idx2oritag)
+                            else:
+                                val_acc, val_micro, val_macro = get_openentity_metrics_for_prompt(y_true, y_pred, idx2tag, idx2oritag, oritag2idx, ori_tag_list)
                         else:
                             val_acc, val_micro, val_macro = get_metrics(y_true, y_pred, idx2oritag, isfewnerd=IS_FEWNERD)
                         print('[STEP %d EVAL RESULT] accuracy: %.4f%%, micro:%s, \
                             macro:%s' % (step, val_acc*100, str(val_micro), str(val_macro)))
 
-                        if val_acc > best_acc:
+                        # if val_acc > best_metric:
+                        #     torch.save(model, MODEL_SAVE_PATH)
+                        #     print('Best checkpoint! checkpoint saved')
+                        #     best_metric = val_acc
+
+                        if val_macro["f"] > best_metric:
                             torch.save(model, MODEL_SAVE_PATH)
                             print('Best checkpoint! checkpoint saved')
-                            best_acc = val_acc
+                            best_metric = val_macro["f"]
 
                         # save training result
                         result_data['val_acc'] = val_acc
@@ -306,9 +341,9 @@ def main():
     load_path = ''
     if args.load_ckpt is not None:
         load_path =  args.load_ckpt
-    #else:
-    #    load_path = MODEL_SAVE_PATH
-    #    print(f'no load_ckpt designated, will load {MODEL_SAVE_PATH} automatically...')
+    else:
+       load_path = MODEL_SAVE_PATH
+       print(f'no load_ckpt designated, will load {MODEL_SAVE_PATH} automatically...')
     if load_path:
         model_dict = torch.load(load_path).state_dict()
         load_info = model.load_state_dict(model_dict)
@@ -334,7 +369,7 @@ def main():
             tag_dist = torch.cat(tag_dist, dim=0)
             prior_dist = torch.mean(tag_dist, dim=0)
 
-        for data in tqdm(test_dataloader):
+        for data in tqdm(test_dataloader, desc="Test"):
 
             text += [' '.join(words) for words in data['words']]
 
@@ -363,21 +398,25 @@ def main():
             y_true = y_true[y_true != tag2idx['other']]
             y_true = y_true.numpy().tolist()
             y_pred = y_pred.numpy().tolist()
-        print(y_true[:100])
-        print(y_pred[:100])
+        # print(y_true[:100])
+        # print(y_pred[:100])
         if args.loss == "multi_label":
-            acc, micro, macro = get_openentity_metrics(y_true, y_pred, idx2oritag)
+            if args.model == "baseline":
+                acc, micro, macro = get_openentity_metrics(y_true, y_pred, idx2oritag)
+            else: # TODO 
+                acc, micro, macro = get_openentity_metrics_for_prompt(y_true, y_pred, idx2tag, idx2oritag, oritag2idx, ori_tag_list)
+
         else:
             acc, micro, macro = get_metrics(y_true, y_pred, idx2oritag, isfewnerd=IS_FEWNERD)
         # acc, micro, macro = get_metrics(y_true, y_pred, idx2oritag, isfewnerd=IS_FEWNERD)
         resultlog.update('test_acc', {'acc':acc, 'micro':micro, 'macro':macro})
         print('[TEST RESULT] accuracy: %.4f%%, micro:%s, macro:%s' % (acc*100, str(micro), str(macro)))
 
-        if args.save_result:
-            d = {'text':text, 'label':[idx2oritag[idx] for idx in y_true], 'pred':[idx2oritag[idx] for idx in y_pred]}
-            d = pd.DataFrame(d)
-            d.to_csv(os.path.join(main_dir, model_name+load_path+'-testresult.csv'))
-            print('test result saved')
+        # if args.save_result:
+        #     d = {'text':text, 'label':[idx2oritag[idx] for idx in y_true], 'pred':[idx2oritag[idx] for idx in y_pred]}
+        #     d = pd.DataFrame(d)
+        #     d.to_csv(os.path.join(main_dir, model_name+load_path+'-testresult.csv'))
+        #     print('test result saved')
                 
     
 

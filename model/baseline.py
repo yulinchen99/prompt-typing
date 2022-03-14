@@ -3,10 +3,9 @@ import torch.nn as nn
 from transformers import AutoConfig, RobertaConfig, BertConfig, RobertaModel, BertModel, RobertaTokenizer, BertTokenizer, GPT2Config, GPT2Tokenizer, GPT2LMHeadModel
 import sys
 sys.path.append('../')
-from util.util import get_tag2inputid
 
 class EntityTypingModel(nn.Module):
-    def __init__(self, model_name, idx2tag, tag_list, out_dim=None, highlight_entity=None, dropout=0.1, usecls=False, max_length=128):
+    def __init__(self, model_name, out_dim, highlight_entity=None, dropout=0.1, usecls=False, max_length=128):
         nn.Module.__init__(self)
         config = AutoConfig.from_pretrained(model_name)
         config.hidden_dropout_prob = dropout
@@ -26,8 +25,6 @@ class EntityTypingModel(nn.Module):
             added_num = self.tokenizer.add_tokens(highlight_entity)
             self.model.resize_token_embeddings(config.vocab_size+added_num)
         self.model = nn.DataParallel(self.model)
-        self.idx2tag = idx2tag
-        self.tag2inputid = get_tag2inputid(self.tokenizer, tag_list)
         self.linear = nn.Linear(config.hidden_size, out_dim)
         self.usecls = usecls
         self.max_length = max_length
@@ -52,7 +49,9 @@ class EntityTypingModel(nn.Module):
             for i in range(len(words)):
                 pos = inputs['entity_pos'][i]
                 words[i] = words[i] + [self.tokenizer.sep_token] + words[i][pos[0]:pos[1]]
-            output = self.tokenizer(words, is_split_into_words=True, return_attention_mask=True, return_tensors='pt', padding=True, max_length = self.max_length)
+            # print(words[0])
+            output = self.tokenizer(words, is_split_into_words=True, return_attention_mask=True, return_tensors='pt', padding="longest", add_special_tokens=True)
+            # print(output['input_ids'][0])
         else:
             output = self.tokenizer(inputs['words'], is_split_into_words=True, return_attention_mask=True, return_tensors='pt', padding=True, max_length=self.max_length)
         tag_output = self.model(input_ids=output['input_ids'].cuda(), attention_mask=output['attention_mask'].cuda(), output_hidden_states=True, return_dict=True)

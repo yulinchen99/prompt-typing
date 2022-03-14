@@ -98,8 +98,13 @@ class FewshotSampler:
 
         # greedy search for support set
         print("sampling...")
+        i = 0
         while not self.__finish__(support_class):
             index = random.choice(candidates)
+            i += 1
+            if i % 10000 == 0:
+                print(f"Tried {i} iters")
+                print("current:", len(support_class), "expected:", len(self.classes)+1)
             if index not in support_idx:
                 if self.__valid_sample__(self.samples[index], support_class, target_classes):
                     self.__additem__(index, support_class)
