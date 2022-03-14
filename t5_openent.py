@@ -195,7 +195,7 @@ def main():
                         logits = prompt_model(inputs)
                         labels = inputs['label']
                         pred = get_output_index(logits)
-                        alllabels.append(labels.cpu().tolist())
+                        alllabels.extend([l.cpu().tolist() for l in labels])
                         allpreds.append(pred)
 
                     acc = sum([int(i==j) for i,j in zip(allpreds, alllabels)])/len(allpreds)
@@ -221,8 +221,8 @@ def main():
         logits = prompt_model(inputs)
         labels = inputs['label']
         pred = get_output_index(logits)
-        alllabels.append(labels.cpu().tolist())
-        allpreds.append(pred)
+        alllabels.extend([l.cpu().tolist() for l in labels])
+        allpreds.extend(pred)
 
     idx2tag = dict(zip(range(len(processor.labels)), processor.labels))
     # tag2idx = dict(zip(range(len(processor.labels)), processor.labels))
