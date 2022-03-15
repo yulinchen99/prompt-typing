@@ -119,8 +119,8 @@ def main():
     # get tag list
     print('get tag list...')
     tag_filename = "tags.txt"
-        if "openentity" in args.data:
-            tag_filename = "types.txt"
+    if "openentity" in args.data:
+        tag_filename = "types.txt"
     ori_tag_list = load_tag_list(args.data, filename=tag_filename)
     if args.model == "baseline":
         out_dim = len(ori_tag_list)
