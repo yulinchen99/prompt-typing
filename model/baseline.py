@@ -48,7 +48,7 @@ class EntityTypingModel(nn.Module):
             words = inputs['words']
             for i in range(len(words)):
                 pos = inputs['entity_pos'][i]
-                words[i] = words[i] + [self.tokenizer.sep_token] + words[i][pos[0]:pos[1]]
+                words[i] = words[i][:self.max_length] + [self.tokenizer.sep_token] + words[i][pos[0]:pos[1]]
             # print(words[0])
             output = self.tokenizer(words, is_split_into_words=True, return_attention_mask=True, return_tensors='pt', padding="longest", add_special_tokens=True)
             # print(output['input_ids'][0])

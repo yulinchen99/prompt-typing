@@ -114,13 +114,13 @@ def main():
     if not args.test_only:
         train_dataloader = PromptDataLoader(dataset=train_dataset, template=mytemplate, tokenizer=tokenizer, 
             tokenizer_wrapper_class=WrapperClass, max_seq_length=128, decoder_max_length=3, 
-            batch_size=16,shuffle=True, teacher_forcing=False, predict_eos_token=False)
+            batch_size=args.batch_size,shuffle=True, teacher_forcing=False, predict_eos_token=False)
         dev_dataloader = PromptDataLoader(dataset=dev_dataset, template=mytemplate, tokenizer=tokenizer, 
             tokenizer_wrapper_class=WrapperClass, max_seq_length=128, decoder_max_length=3, 
-            batch_size=16,shuffle=True, teacher_forcing=False, predict_eos_token=False)
+            batch_size=args.val_batch_size,shuffle=True, teacher_forcing=False, predict_eos_token=False)
     test_dataloader = PromptDataLoader(dataset=test_dataset, template=mytemplate, tokenizer=tokenizer, 
         tokenizer_wrapper_class=WrapperClass, max_seq_length=128, decoder_max_length=3, 
-        batch_size=32,shuffle=True, teacher_forcing=False, predict_eos_token=False)
+        batch_size=args.val_batch_size,shuffle=True, teacher_forcing=False, predict_eos_token=False)
     # next(iter(train_dataloader))
 
 

@@ -118,16 +118,16 @@ def main():
 
     # get tag list
     print('get tag list...')
-    if args.model == "baseline":
-        tag_filename = "tags.txt"
+    tag_filename = "tags.txt"
         if "openentity" in args.data:
             tag_filename = "types.txt"
-        ori_tag_list = load_tag_list(args.data, filename=tag_filename)
+    ori_tag_list = load_tag_list(args.data, filename=tag_filename)
+    if args.model == "baseline":
         out_dim = len(ori_tag_list)
     elif args.model == "maskedlm":
-        ori_tag_list = load_tag_list(args.data)
+        tag_list = load_tag_list(args.data)
         tag_mapping = load_tag_mapping(args.data)
-        mapped_tag_list = [tag_mapping[t] for t in ori_tag_list]
+        mapped_tag_list = [tag_mapping[t] for t in tag_list]
         out_dim = len(tag_mapping)
         tag2idx = {tag:idx for idx, tag in enumerate(mapped_tag_list)}
         idx2tag = {idx:tag for idx, tag in enumerate(mapped_tag_list)}
@@ -341,9 +341,9 @@ def main():
     load_path = ''
     if args.load_ckpt is not None:
         load_path =  args.load_ckpt
-    else:
-       load_path = MODEL_SAVE_PATH
-       print(f'no load_ckpt designated, will load {MODEL_SAVE_PATH} automatically...')
+    # else:
+    #    load_path = MODEL_SAVE_PATH
+    #    print(f'no load_ckpt designated, will load {MODEL_SAVE_PATH} automatically...')
     if load_path:
         model_dict = torch.load(load_path).state_dict()
         load_info = model.load_state_dict(model_dict)
@@ -382,6 +382,7 @@ def main():
 
             if args.loss == "multi_label":
                 tag_pred = get_output_index(tag_score)
+                # print(len(tag_pred[0]))
             else: 
                 tag_pred = torch.argmax(tag_score, dim=1).cpu().numpy().tolist()
 
@@ -404,6 +405,7 @@ def main():
             if args.model == "baseline":
                 acc, micro, macro = get_openentity_metrics(y_true, y_pred, idx2oritag)
             else: # TODO 
+                print("calculating metrics...")
                 acc, micro, macro = get_openentity_metrics_for_prompt(y_true, y_pred, idx2tag, idx2oritag, oritag2idx, ori_tag_list)
 
         else:

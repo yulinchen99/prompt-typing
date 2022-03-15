@@ -50,7 +50,10 @@ def loose_micro(labels, predictions):
         cnt_pred += len(pred)
         cnt_label += len(label)
         cnt_correct += len(label.intersection(pred))
-    p = cnt_correct/cnt_pred
+    if cnt_pred > 0:
+        p = cnt_correct/cnt_pred
+    else:
+        p = 0.0
     r = cnt_correct/cnt_label
     f = f1(p, r)
     #print("Loose Micro:")

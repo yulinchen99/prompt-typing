@@ -40,10 +40,10 @@ class Prompt:
             tokens = [t for t in tokens if t]
             return tokens
     
-    def get_prompt_sentence(self, words, pos, prompt_mode):
+    def get_prompt_sentence(self, words, pos, prompt_mode, max_length):
         prompt = self.prompt_dict[prompt_mode]
         sep = self.sep_dict[prompt_mode]
-        newwords = words + sep + words[pos[0]:pos[1]] + prompt
+        newwords = words[:max_length] + sep + words[pos[0]:pos[1]] + prompt
         newwords = [w for w in newwords if w]
         return newwords
 

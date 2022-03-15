@@ -107,7 +107,8 @@ def main():
 
     # You can load the plm related things provided by openprompt simply by calling:
     plm, tokenizer, model_config, WrapperClass = load_plm(args.model, args.model_name)
-
+    if args.load_ckpt:
+        plm = plm.from_pretrained(args.load_ckpt)
     # Constructing Template
     # A template can be constructed from the yaml config, but it can also be constructed by directly passing arguments.
     template_text = '{"placeholder":"text_a"} In this sentence, {"meta": "entity"} is a {"mask"}.'
