@@ -34,6 +34,9 @@ class Sample:
 
     def valid(self, max_length):
         return self.pos[1] <= max_length and len(self.words) <= max_length
+    
+    def __str__(self):
+        return f"Example\nwords: {self.words}\ntag: {self.tag}\nlabel: {self.label}\npos: {self.pos}\n"
 
 
 class EntityTypingDataset(data.Dataset):
@@ -127,8 +130,6 @@ class OpenEntityDataset(EntityTypingDataset):
                 mention = d["mention_span"].split(" ")
                 end = start + len(mention)
                 label = [self.tag2id[t] for t in tag if t in self.tag2id]
-                if not label:
-                    continue
                 words = d["left_context_token"] + mention + d["right_context_token"]
                 sample = OESample(words[:self.max_length], tag, label, (start, end))
                 if sample.valid(self.max_length):
@@ -165,6 +166,51 @@ class OpenEntityDatasetForPrompt(OpenEntityDataset):
         tags = list(set(tags))
         tags = [self.tag_mapping.get(t, None) for t in tags] # map to label words
         return tags
+
+class OpenEntityGeneralDataset(EntityTypingDataset):
+
+    def __load_data_from_file__(self, filepath):
+        for file in filepath:
+            if not os.path.exists(file):
+                print(f"[ERROR] Data file {filepath} does not exist!")
+                assert(0)
+            with open(file, 'r', encoding='utf-8')as f:
+                lines = f.readlines()
+            data = json.loads(lines[0])
+            for d in tqdm(data, desc="load"):
+                tag = d["labels"]
+                text = d["sent"]
+                words = text.split(" ")
+                start = len(text[:d["start"]].strip().split(" "))
+                end = start + len(text[d["start"]:d["end"]].split(" "))
+                label = [self.tag2id[t] for t in tag if t in self.tag2id]
+                sample = OESample(words, tag, label, (start, end))
+                # if sample.valid(self.max_length):
+                self.samples.append(sample)
+            
+        # add <ENTITY> </ENTITY> 
+        if self.highlight_entity:
+            for sample in self.samples:
+                sample.highlight(self.highlight_entity)
+        
+        print(f"{len(self.samples)} samples loaded.")
+        
+    def _get_filepath(self, datadir, mode):
+        if mode == "test" or mode == "dev" or mode == "train":
+            return [os.path.join(datadir, f'{mode}.json')]
+        else:
+            return [os.path.join(datadir, f'{mode}.json'), os.path.join(datadir, f"el_{mode}.json"), os.path.join(datadir, f"headword_{mode}.json")]
+
+    
+    def __sample_data__(self):
+        if self.sample_num is None:
+            return
+        # for each type of entity, sample by sample_num
+        sampler = FewshotSampler(self.sample_num, samples=self.samples)
+        sampled_idx = sampler.__next__()
+        self.samples = [self.samples[i] for i in sampled_idx]
+
+OpenEntityGeneralDatasetForPrompt = OpenEntityGeneralDataset
 
 def collate_fn(samples):
     batch_data = {'words':[], 'labels':[], 'entity_pos':[]}
