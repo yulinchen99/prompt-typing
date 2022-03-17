@@ -12,7 +12,7 @@ from openprompt.data_utils import InputExample, data_sampler
 from openprompt.plms import load_plm
 from openprompt.prompts import ManualTemplate
 # from openprompt.data_utils.typing_dataset import FewNERDProcessor
-from openprompt_util.dataprocessor import BBNProcessor, OntoNoteProcessor, FewNerdProcessor, OpenEntityProcessor
+from openprompt_util.dataprocessor import BBNProcessor, OntoNoteProcessor, FewNerdProcessor, OpenEntityProcessor, OpenEntityGeneralProcessor
 import argparse
 import random
 import numpy as np
@@ -30,7 +30,7 @@ from util.metrics import get_openentity_metrics_for_prompt
 
 
 
-processors = {"openentity": OpenEntityProcessor}
+processors = {"openentity": OpenEntityProcessor, "openentity-general": OpenEntityGeneralProcessor}
 
 def set_seed(seed):
     torch.manual_seed(seed)
@@ -55,7 +55,7 @@ def main():
     parser.add_argument('--data', type=str, default='fewnerd', help='ontonote, fewnerd or bbn')
     parser.add_argument('--model', type=str, default='t5', help='model type')
     parser.add_argument('--epoch', type=int, default=10)
-    parser.add_argument('--lr', type=float, default=1e-5)
+    parser.add_argument('--lr', type=float, default=5e-5)
     # parser.add_argument('--embed_lr', type=float, default=1e-4)
     parser.add_argument('--lr_step_size', type=int, default=200)
     parser.add_argument('--grad_accum_step', type=int, default=1)
@@ -96,6 +96,14 @@ def main():
     dev_dataset = processor.get_dev_examples(f"./data/{args.data}/")
     test_dataset = processor.get_test_examples(f"./data/{args.data}/")
 
+    idx2tag = dict(zip(range(len(processor.labels)), processor.labels))
+    # tag2idx = dict(zip(range(len(processor.labels)), processor.labels))
+    with open(f"./data/{args.data}/types.txt")as f:
+        lines = f.readlines()
+        ori_tag_list = [line.strip() for line in lines]
+    idx2oritag = dict(zip(range(len(ori_tag_list)), ori_tag_list))
+    oritag2idx = dict(zip(ori_tag_list, range(len(ori_tag_list))))
+
     if args.sample_num is not None:
         sampler = data_sampler.FewShotSampler(num_examples_per_label=args.sample_num)
         train_dataset = sampler(train_dataset, seed=args.seed)
@@ -111,9 +119,8 @@ def main():
         plm = plm.from_pretrained(args.load_ckpt)
     # Constructing Template
     # A template can be constructed from the yaml config, but it can also be constructed by directly passing arguments.
-    template_text = '{"placeholder":"text_a"} In this sentence, {"meta": "entity"} is a {"mask"}.'
+    template_text = '{"placeholder":"text_a"} In this sentence, {"meta": "entity"} is a {"mask"}'
     mytemplate = ManualTemplate(tokenizer=tokenizer, text=template_text)
-
 
     # We provide a `PromptDataLoader` class to help you do all the above matters and wrap them into an `torch.DataLoader` style iterator.
 
@@ -162,6 +169,7 @@ def main():
     ]
 
     optimizer = AdamW(optimizer_grouped_parameters, lr=args.lr)
+    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=100, num_training_steps=args.epoch*len(train_dataloader))
     best_acc = 0.0
     global_step = 0
     if not args.test_only:
@@ -180,6 +188,7 @@ def main():
                 loss.backward()
                 tot_loss += loss.item()
                 optimizer.step()
+                scheduler.step()
                 optimizer.zero_grad()
                 if step %100 ==1:
                     print("Epoch {}, average loss: {}".format(epoch, tot_loss/(step+1)), flush=True)
@@ -197,13 +206,16 @@ def main():
                         labels = inputs['label']
                         pred = get_output_index(logits)
                         alllabels.extend([l.cpu().tolist() for l in labels])
-                        allpreds.append(pred)
+                        allpreds.extend(pred)
 
-                    acc = sum([int(i==j) for i,j in zip(allpreds, alllabels)])/len(allpreds)
-                    print("validation acc:", acc)
-                    if acc > best_acc:
+                    # acc = sum([int(i==j) for i,j in zip(allpreds, alllabels)])/len(allpreds)
+                    # print(allpreds[0])
+                    acc, micro, macro = get_openentity_metrics_for_prompt(alllabels, allpreds, idx2tag, idx2oritag, oritag2idx, ori_tag_list)
+                    # print("validation acc:", acc)
+                    print(f"VAL RESULT: \nacc: {acc}\nmicro: {micro}\nmacro:{macro}", )
+                    if micro["f"] > best_acc:
                         print("best checkpoint!")
-                        best_acc = acc
+                        best_acc = micro["f"]
                         plm.save_pretrained(f"output/{args.model}-{args.data}-{args.sample_num}")
     
     if not args.test_only and os.path.exists(f"output/{args.model}-{args.data}-{args.sample_num}"):
@@ -220,18 +232,15 @@ def main():
                 if isinstance(inputs[k], torch.Tensor):
                     inputs[k] = inputs[k].cuda()
         logits = prompt_model(inputs)
+        # print(logits.size())
         labels = inputs['label']
         pred = get_output_index(logits)
+        # print(pred)
+
         alllabels.extend([l.cpu().tolist() for l in labels])
         allpreds.extend(pred)
 
-    idx2tag = dict(zip(range(len(processor.labels)), processor.labels))
-    # tag2idx = dict(zip(range(len(processor.labels)), processor.labels))
-    with open("./data/openentity/types.txt")as f:
-        lines = f.readlines()
-        ori_tag_list = [line.strip() for line in lines]
-    idx2oritag = dict(zip(range(len(ori_tag_list)), ori_tag_list))
-    oritag2idx = dict(zip(ori_tag_list, range(len(ori_tag_list))))
+
     acc, micro, macro = get_openentity_metrics_for_prompt(alllabels, allpreds, idx2tag, idx2oritag, oritag2idx, ori_tag_list)
 
     # acc = sum([int(i==j) for i,j in zip(allpreds, alllabels)])/len(allpreds)

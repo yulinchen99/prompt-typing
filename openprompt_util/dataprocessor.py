@@ -107,3 +107,33 @@ class OpenEntityProcessor(DataProcessor):
             example = InputExample(guid=str(idx), text_a=text_a, meta=meta, label=labels)
             examples.append(example)
         return examples
+
+class OpenEntityGeneralProcessor(DataProcessor):
+    def __init__(self):
+        super().__init__()
+        self.labels = json.load(open("./openprompt_util/script/openentity-general/labels.json"))
+    
+    def _get_tags(self, d):
+        tags = []
+        for tag in d["y_str"]:
+            tag_list = tag.split("_")
+            tags += tag_list
+        tags = list(set(tags))
+        tags = [t for t in tags if t in self.labels] # map to label words
+        return tags
+    
+    def get_examples(self, data_dir, split):
+        path = os.path.join(data_dir, "{}.json".format(split))
+        examples = []
+        with open(path, 'r', encoding='utf-8')as f:
+            lines = f.readlines()
+        data = json.loads(lines[0])
+        for idx, d in enumerate(data):
+            tag = d["labels"]
+            labels = [self.get_label_id(t) for t in tag]
+            text_a = d["sent"]
+            entity = text_a[d["start"]:d["end"]]
+            meta = {"entity": entity, "label": labels}
+            example = InputExample(guid=str(idx), text_a=text_a, meta=meta, label=labels)
+            examples.append(example)
+        return examples

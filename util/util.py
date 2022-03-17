@@ -119,7 +119,8 @@ class MultiLabelLoss(nn.Module):
     def forward(self, score, label, model_type="baseline"):
         binary_label = torch.zeros(score.size()).to(score.device)
         for i, la in enumerate(label):
-            binary_label[i][la] = 1.0
+            if len(la):
+                binary_label[i][la] = 1.0
         if model_type == "maskedlm": # use simple BCE loss for maskedlm
             return self.loss(score, binary_label)
         else:
@@ -189,6 +190,25 @@ class MultiLabelLoss(nn.Module):
         return loss if loss_is_valid else None
 
 def get_output_index(outputs):
+    """
+    Given outputs from the decoder, generate prediction index.
+    :param outputs:
+    :return:
+    """
+    pred_idx = []
+    outputs = sigmoid_fn(outputs).data.cpu().clone()
+    for single_dist in outputs:
+        single_dist = single_dist.numpy()
+        pred_id = np.where(single_dist > 0.5)[0].tolist()
+        # if not pred_id:
+        #     arg_max_ind = np.argmax(single_dist)
+        #     pred_id = [arg_max_ind]
+        # pred_id.extend(
+            # [i for i in range(len(single_dist)) if single_dist[i] > 0.5 and i != arg_max_ind])
+        pred_idx.append(pred_id)
+    return pred_idx
+
+def get_output_index_not_empty(outputs):
     """
     Given outputs from the decoder, generate prediction index.
     :param outputs:

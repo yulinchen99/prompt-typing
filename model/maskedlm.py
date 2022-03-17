@@ -58,7 +58,7 @@ class EntityTypingModel(nn.Module):
             #self.word_embedding = self.model.roberta.get_input_embeddings()
         elif isinstance(config, BertConfig):
             self.model = BertForMaskedLM.from_pretrained(model_name)
-            self.tokenizer = BertTokenizer.from_pretrained(model_name)
+            self.tokenizer = BertTokenizer.from_pretrained("bert-base-cased")
             #self.word_embedding = self.model.bert.get_input_embeddings()
         elif isinstance(config, GPT2Config):
             self.model = GPT2LMHeadModel.from_pretrained(model_name)
@@ -138,7 +138,9 @@ class EntityTypingModel(nn.Module):
         input_words = []
         for i, words in enumerate(inputs['words']):
             pos = inputs['entity_pos'][i]
-            newwords = self.prompt.get_prompt_sentence(words, pos, self.prompt_mode)
+            newwords = self.prompt.get_prompt_sentence(words, pos, self.prompt_mode, self.max_length)
+            # if i == 0:
+            #     print(newwords)
             if not isinstance(self.tokenizer, GPT2Tokenizer):
                 newwords += [self.tokenizer.mask_token]
             input_words.append(newwords)

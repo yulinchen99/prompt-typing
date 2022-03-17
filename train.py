@@ -1,7 +1,7 @@
 import sys
 import argparse
 from transformers import BertConfig, RobertaConfig
-from util.data_loader import get_loader, EntityTypingDataset, OpenEntityDataset, OpenEntityDatasetForPrompt
+from util.data_loader import get_loader, EntityTypingDataset, OpenEntityDataset, OpenEntityDatasetForPrompt, OpenEntityGeneralDataset, OpenEntityGeneralDatasetForPrompt
 from model.baseline import EntityTypingModel as BaselineModel
 from model.maskedlm import EntityTypingModel as MaskedLM
 from util.util import load_tag_mapping, get_tag2inputid, load_tag_list, ResultLog, get_tokenizer, PartialLabelLoss, MultiLabelLoss, get_output_index
@@ -22,6 +22,8 @@ import pandas as pd
 #from memory_profiler import profile
 
 warnings.filterwarnings('ignore')
+
+DATA_CLASS = {"default": [EntityTypingDataset, EntityTypingDataset], "openentity": [OpenEntityDataset, OpenEntityDatasetForPrompt], "openentity-general": [OpenEntityGeneralDataset, OpenEntityGeneralDatasetForPrompt]}
 
 def set_seed(seed):
     torch.manual_seed(seed)
@@ -87,19 +89,19 @@ def main():
     # main_dir = '/mnt/sfs_turbo/cyl/ner-mlm/'
     main_dir = sys.path[0] + '/'
     IS_FEWNERD=args.data=='fewnerd'
-    if args.data == "openentity":
+    if args.data == "openentity" or args.data == "openentity-general":
         args.loss = "multi_label"
 
     args.data = os.path.join(main_dir + 'data', args.data)
     print('data path:', args.data)
 
     # model saving path
-    data = args.data.split('/')[-1]
+    data_name = args.data.split('/')[-1]
     if '/' not in args.model_name:
         model_name = args.model_name
     else:
         model_name = '-'.join(args.model_name.split('/')[-2:])
-    MODEL_SAVE_PATH = os.path.join(main_dir, args.save_dir, f'{args.model}-{model_name}-{data}-{args.prompt}-seed_{args.seed}-{args.sample_num}')
+    MODEL_SAVE_PATH = os.path.join(main_dir, args.save_dir, f'{args.model}-{model_name}-{data_name}-{args.prompt}-seed_{args.seed}-{args.sample_num}')
     if args.ckpt_name:
         MODEL_SAVE_PATH += '_' + args.ckpt_name
 
@@ -151,17 +153,19 @@ def main():
     print(f'initializing data from {args.data}...')
     if "openentity" in args.data:
         if args.model == "baseline":
-            train_dataset = OpenEntityDataset(args.data, 'train', args.max_length, oritag2idx, highlight_entity=HIGHLIGHT_ENTITY, sample_num=args.sample_num)
-            val_dataset = OpenEntityDataset(args.data, 'dev', args.max_length, oritag2idx, highlight_entity=HIGHLIGHT_ENTITY)
-            test_dataset = OpenEntityDataset(args.data, 'test', args.max_length, oritag2idx, highlight_entity=HIGHLIGHT_ENTITY)
+            train_dataset = DATA_CLASS.get(data_name, DATA_CLASS["default"])[0](args.data, 'train', args.max_length, oritag2idx, highlight_entity=HIGHLIGHT_ENTITY, sample_num=args.sample_num)
+            val_dataset = DATA_CLASS.get(data_name, DATA_CLASS["default"])[0](args.data, 'dev', args.max_length, oritag2idx, highlight_entity=HIGHLIGHT_ENTITY)
+            test_dataset = DATA_CLASS.get(data_name, DATA_CLASS["default"])[0](args.data, 'test', args.max_length, oritag2idx, highlight_entity=HIGHLIGHT_ENTITY)
         else:
-            train_dataset = OpenEntityDatasetForPrompt(args.data, 'train', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY, sample_num=args.sample_num)
-            val_dataset = OpenEntityDatasetForPrompt(args.data, 'dev', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
-            test_dataset = OpenEntityDatasetForPrompt(args.data, 'test', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
+            train_dataset = DATA_CLASS.get(data_name, DATA_CLASS["default"])[1](args.data, 'train', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY, sample_num=args.sample_num)
+            val_dataset = DATA_CLASS.get(data_name, DATA_CLASS["default"])[1](args.data, 'dev', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
+            test_dataset = DATA_CLASS.get(data_name, DATA_CLASS["default"])[1](args.data, 'test', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
     else:
         train_dataset = EntityTypingDataset(args.data, 'train', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY, sample_num=args.sample_num)
         val_dataset = EntityTypingDataset(args.data, 'dev', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
         test_dataset = EntityTypingDataset(args.data, 'test', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
+
+    print(train_dataset[0])
 
     train_dataloader = get_loader(train_dataset, args.batch_size)
     if args.sample_num is not None and len(train_dataset) < len(val_dataset):
@@ -233,6 +237,7 @@ def main():
             model.train()
             # result for each epoch
             for data in tqdm(train_dataloader, desc=f"Train Epoch {i+1}"):
+                # print(data)
                 to_cuda(data)
                 tag_score = model(data)
                 loss = Loss(tag_score, data['labels'], model_type = args.model)
@@ -315,10 +320,10 @@ def main():
                         #     print('Best checkpoint! checkpoint saved')
                         #     best_metric = val_acc
 
-                        if val_macro["f"] > best_metric:
+                        if val_micro["f"] > best_metric:
                             torch.save(model, MODEL_SAVE_PATH)
                             print('Best checkpoint! checkpoint saved')
-                            best_metric = val_macro["f"]
+                            best_metric = val_micro["f"]
 
                         # save training result
                         result_data['val_acc'] = val_acc
