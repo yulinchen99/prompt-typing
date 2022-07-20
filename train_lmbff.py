@@ -17,14 +17,16 @@ import argparse
 import random
 import numpy as np
 from openprompt import PromptDataLoader
-from openprompt.prompts import ManualVerbalizer
+from openprompt.prompts import ManualVerbalizer, T5TemplateGenerator
 import torch
 from openprompt import PromptForClassification
 from util.metrics import get_metrics
 from tqdm import tqdm
 import os
+from transformers import  AdamW, get_linear_schedule_with_warmup
 
 
+use_cuda = True
 
 processors = {"fewnerd": FewNerdProcessor, "ontonote": OntoNoteProcessor, "bbn": BBNProcessor}
 
@@ -39,6 +41,47 @@ def to_cuda(data):
     for item in data:
         if isinstance(data[item], torch.LongTensor):
             data[item] = data[item].cuda()
+
+def fit(model, train_dataloader, val_dataloader, loss_func, optimizer, scheduler=None):
+    best_score = 0.0
+    for epoch in range(30):
+        train_epoch(model, train_dataloader, loss_func, optimizer, scheduler=scheduler)
+        score = evaluate(model, val_dataloader)
+        if score > best_score:
+            best_score = score
+    return best_score
+
+
+def train_epoch(model, train_dataloader, loss_func, optimizer, scheduler=None):
+    global use_cuda
+    model.train()
+    for step, inputs in enumerate(train_dataloader):
+        if use_cuda:
+            inputs = inputs.cuda()
+        logits = model(inputs)
+        labels = inputs['label']
+        loss = loss_func(logits, labels)
+        loss.backward()
+        optimizer.step()
+        if scheduler is not None:
+            scheduler.step()
+        optimizer.zero_grad()
+
+def evaluate(model, val_dataloader):
+    global use_cuda
+    model.eval()
+    allpreds = []
+    alllabels = []
+    with torch.no_grad():
+        for step, inputs in enumerate(val_dataloader):
+            if use_cuda:
+                inputs = inputs.cuda()
+            logits = model(inputs)
+            labels = inputs['label']
+            alllabels.extend(labels.cpu().tolist())
+            allpreds.extend(torch.argmax(logits, dim=-1).cpu().tolist())
+    acc = sum([int(i==j) for i,j in zip(allpreds, alllabels)])/len(allpreds)
+    return acc
 
 def main():
     # param
@@ -70,19 +113,6 @@ def main():
     parser.add_argument('--save_result', action='store_true', default=False)
 
 
-
-
-    # for soft prompt only
-    parser.add_argument('--prompt', type=str, default='soft', help='soft or hard')
-    #parser.add_argument('--dual_optim', action='store_true', default=False, help='set True if separate learning rate in maskedlm p-prompt setting is desired')
-    parser.add_argument('--dropout', type=float, default=0.1)
-
-    # for baseline only
-    parser.add_argument('--usecls', action='store_true', default=False)
-    parser.add_argument('--highlight_entity', type=str, default=None, help='for baseline model, highlight tokens around entity')
-    parser.add_argument('--loss', type=str, default='cross', help='cross or partial')
-
-
     args = parser.parse_args()
     # set random seed
     set_seed(args.seed)
@@ -99,55 +129,112 @@ def main():
     if args.sample_num is not None and len(train_dataset) < len(dev_dataset):
         indices = torch.randperm(len(dev_dataset), generator=torch.Generator().manual_seed(0)).tolist()
         dev_dataset = [dev_dataset[i] for i in indices[:len(train_dataset)]]
-        # dev_dataset, _ = torch.utils.data.random_split(dev_dataset, [len(train_dataset), len(dev_dataset)-len(train_dataset)], generator=torch.Generator().manual_seed(0))
 
     # You can load the plm related things provided by openprompt simply by calling:
     plm, tokenizer, model_config, WrapperClass = load_plm(args.model, args.model_name)
 
-    # Constructing Template
-    # A template can be constructed from the yaml config, but it can also be constructed by directly passing arguments.
-    template_text = '{"placeholder":"text_a"} In this sentence, {"meta": "entity"} is a {"mask"}.'
-    mytemplate = ManualTemplate(tokenizer=tokenizer, text=template_text)
-
-
-    # We provide a `PromptDataLoader` class to help you do all the above matters and wrap them into an `torch.DataLoader` style iterator.
-    if not args.test_only:
-        train_dataloader = PromptDataLoader(dataset=train_dataset, template=mytemplate, tokenizer=tokenizer, 
-            tokenizer_wrapper_class=WrapperClass, max_seq_length=128, decoder_max_length=3, 
-            batch_size=args.batch_size,shuffle=True, teacher_forcing=False, predict_eos_token=False)
-        dev_dataloader = PromptDataLoader(dataset=dev_dataset, template=mytemplate, tokenizer=tokenizer, 
-            tokenizer_wrapper_class=WrapperClass, max_seq_length=128, decoder_max_length=3, 
-            batch_size=args.val_batch_size,shuffle=True, teacher_forcing=False, predict_eos_token=False)
-    test_dataloader = PromptDataLoader(dataset=test_dataset, template=mytemplate, tokenizer=tokenizer, 
-        tokenizer_wrapper_class=WrapperClass, max_seq_length=128, decoder_max_length=3, 
-        batch_size=args.val_batch_size,shuffle=True, teacher_forcing=False, predict_eos_token=False)
-    # next(iter(train_dataloader))
-
-
-    # Define the verbalizer
-    # In classification, you need to define your verbalizer, which is a mapping from logits on the vocabulary to the final label probability. Let's have a look at the verbalizer details:
-
-
-
     # for example the verbalizer contains multiple label words in each class
     myverbalizer = ManualVerbalizer(tokenizer, classes=processor.labels).from_file(f"./openprompt_util/script/{args.data}/verbalizer.json")
 
-    # print(myverbalizer.label_words_ids)
-    # logits = torch.randn(2,len(tokenizer)) # creating a pseudo output from the plm, and 
-    # print(myverbalizer.process_logits(logits)) # see what the verbalizer do
+
+    # prompt_model = PromptForClassification(plm=plm,template=mytemplate, verbalizer=myverbalizer, freeze_plm=False)
+    # if use_cuda:
+    #     prompt_model=  prompt_model.cuda()
+
+    # LMBFF: model for generating template
+    template_generate_model, template_generate_tokenizer, template_generate_model_config, template_tokenizer_wrapper = load_plm('t5', 't5-large')
+
+    from openprompt.prompts.prompt_generator import LMBFFTemplateGenerationTemplate
+    import copy
+    template = LMBFFTemplateGenerationTemplate(tokenizer=template_generate_tokenizer, verbalizer=myverbalizer, text='{"placeholder":"text_a"} {"mask"} {"meta":"labelword"}.')
+
+    print("wrapped example for template generation:", template.wrap_one_example(train_dataset[0]))
 
 
-    # Although you can manually combine the plm, template, verbalizer together, we provide a pipeline 
-    # model which take the batched data from the PromptDataLoader and produce a class-wise logits
+    # ############################## LMBFF start #####################################
+    print('performing auto_t...')
 
-
-    use_cuda = True
-    prompt_model = PromptForClassification(plm=plm,template=mytemplate, verbalizer=myverbalizer, freeze_plm=False)
     if use_cuda:
-        prompt_model=  prompt_model.cuda()
+        template_generate_model = template_generate_model.cuda()
+    template_generator = T5TemplateGenerator(template_generate_model, template_generate_tokenizer, template_tokenizer_wrapper, myverbalizer, beam_width=100, target_number=1)
+
+
+    dataloader = PromptDataLoader(train_dataset, template, tokenizer=template_generate_tokenizer, tokenizer_wrapper_class=template_tokenizer_wrapper, batch_size=len(train_dataset), decoder_max_length=128, max_seq_length=128, shuffle=False, teacher_forcing=False) # register all data at once
+    for data in dataloader:
+        if use_cuda:
+            data = data.cuda()
+        template_generator._register_buffer(data)
+    
+    template_filepath = f"generated_templates_{args.data}_{args.sample_num}_{args.seed}.txt"
+
+    if not os.path.exists(template_filepath):
+        template_generate_model.eval()
+        print('generating...')
+
+        template_texts = template_generator._get_templates()
+
+        original_template = template.text
+        template_texts = [template_generator.convert_template(template_text, original_template) for template_text in template_texts]
+        # template_generator._show_template()
+        # generate a number of candidate template text
+        # print("generated templates:", template_texts)
+        with open(template_filepath, "w")as f:
+            f.writelines("\n".join(template_texts))
+        print("generated templates saved")
+    template_generator.release_memory()
+
+    template_texts = [t.strip() for t in open(template_filepath).readlines()]
+
+    
+    # iterate over each candidate and select the best one
+    best_metrics = 0.0
+    best_template_text = None
+    for template_text in tqdm(template_texts):
+        template = ManualTemplate(tokenizer, template_text)
+
+        train_dataloader = PromptDataLoader(train_dataset, template, tokenizer=tokenizer, tokenizer_wrapper_class=WrapperClass, batch_size=args.batch_size, decoder_max_length=128, max_seq_length=args.max_length, shuffle=True, teacher_forcing=False)
+        valid_dataloader = PromptDataLoader(dev_dataset, template, tokenizer=tokenizer, tokenizer_wrapper_class=WrapperClass, batch_size=args.val_batch_size, decoder_max_length=128, max_seq_length=args.max_length, shuffle=False, teacher_forcing=False)
+
+        model = PromptForClassification(copy.deepcopy(plm), template, myverbalizer)
+
+        loss_func = torch.nn.CrossEntropyLoss()
+        no_decay = ['bias', 'LayerNorm.weight']
+        # it's always good practice to set no decay to biase and LayerNorm parameters
+        optimizer_grouped_parameters = [
+            {'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
+            {'params': [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
+        ]
+
+        optimizer = AdamW(optimizer_grouped_parameters, lr=1e-4)
+        global_train_iter = len(train_dataloader) * args.epoch 
+        scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_step, num_training_steps=global_train_iter)
+        if use_cuda:
+            model = model.cuda()
+        score = fit(model, train_dataloader, valid_dataloader, loss_func, optimizer, scheduler=scheduler)
+
+        if score > best_metrics:
+            print('best score:', score)
+            print('template:', template_text)
+            best_metrics = score
+            best_template_text = template_text
+    # use the best template
+    mytemplate = ManualTemplate(tokenizer, text=best_template_text)
+    print("final best templates:", best_template_text)
+    with open(template_filepath[:-4] + "_best.txt", "w")as f:
+        f.writelines(best_template_text)
+
+    # ############################## LMBFF done #####################################
+
+    train_dataloader = PromptDataLoader(train_dataset, mytemplate, tokenizer=tokenizer, tokenizer_wrapper_class=WrapperClass, batch_size=args.batch_size, decoder_max_length=3, max_seq_length=args.max_length, shuffle=True, teacher_forcing=False)
+    dev_dataloader = PromptDataLoader(dev_dataset, mytemplate, tokenizer=tokenizer, tokenizer_wrapper_class=WrapperClass, batch_size=args.batch_size, decoder_max_length=3, max_seq_length=args.max_length, shuffle=False, teacher_forcing=False)
+    test_dataloader = PromptDataLoader(test_dataset, mytemplate, tokenizer=tokenizer, tokenizer_wrapper_class=WrapperClass, batch_size=args.batch_size, decoder_max_length=3, max_seq_length=args.max_length, shuffle=False, teacher_forcing=False)
+
+    prompt_model = PromptForClassification(plm, mytemplate, myverbalizer)
+    if use_cuda:
+        prompt_model = prompt_model.cuda()
+
 
     # Now the training is standard
-    from transformers import  AdamW, get_linear_schedule_with_warmup
     loss_func = torch.nn.CrossEntropyLoss()
     no_decay = ['bias', 'LayerNorm.weight']
     # it's always good practice to set no decay to biase and LayerNorm parameters
@@ -157,8 +244,6 @@ def main():
     ]
 
     optimizer = AdamW(optimizer_grouped_parameters, lr=args.lr)
-    global_train_iter = len(train_dataloader) * args.epoch
-    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_step, num_training_steps=global_train_iter)
     best_acc = 0.0
     global_step = 0
     if not args.test_only:
@@ -173,7 +258,6 @@ def main():
                 loss.backward()
                 tot_loss += loss.item()
                 optimizer.step()
-                scheduler.step()
                 optimizer.zero_grad()
                 if step %1000 ==1:
                     print("Epoch {}, average loss: {}".format(epoch, tot_loss/(step+1)), flush=True)
@@ -218,6 +302,7 @@ def main():
 
     idx2oritag = dict(zip(range(len(processor.labels)), processor.labels))
     oritag2idx = dict(zip(processor.labels, range(len(processor.labels))))
+
     if 'ontonote' in args.data:
         alllabels = torch.LongTensor(alllabels)
         allpreds = torch.LongTensor(allpreds)
@@ -230,7 +315,7 @@ def main():
     # acc = sum([int(i==j) for i,j in zip(allpreds, alllabels)])/len(allpreds)
     print(f"TEST RESULT: \nacc: {acc}\nmicro: {micro}\nmacro:{macro}", )
 
-    with open("result_supervised.txt", "a+")as f:
+    with open("result_supervised_lmbff.txt", "a+")as f:
         f.writelines(f"model: {args.model}\nsample_num: {args.sample_num}\ndata:{args.data}\n")
         f.writelines(f"TEST RESULT: \nacc: {acc}\nmicro: {micro}\nmacro:{macro}\n\n")
 
