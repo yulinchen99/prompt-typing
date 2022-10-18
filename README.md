@@ -1,7 +1,5 @@
 # Prompt Typing
-Code and data for EMNLP 2022 paper Prompt-Learning for Fine-Grained Entity Typing.
-
-This repository contains code for experiments on BBN, Few-NERD, OntoNotes and OpenEntity with BERT-base-cased.
+Code and data for EMNLP 2022 Findings paper **Prompt-Learning for Fine-Grained Entity Typing**. This repository contains code for experiments on BBN, Few-NERD, OntoNotes and OpenEntity with BERT-base-cased. And the methodology is also be found in the [OpenPrompt](https://github.com/thunlp/OpenPrompt/blob/main/experiments/typing_ptyping.yaml) repository.
 
 ## Project Structure
 ```
@@ -78,3 +76,16 @@ Specify `--prompt` arguments to denote which template to be used. Below is a lis
 - `soft1`: `<text> [P] <entity> [P1] [P2] [P3] <mask>`
 - `soft2`: `<text> [P] <entity> [P1] [P2] [P3] [P4] <mask>`
 - `soft3`: `<text> [P] <entity> [P1] [P2] [P3] [P4] <mask>`
+
+### Citation
+
+```bibtex
+@article{ding2021prompt,
+  title={Prompt-learning for fine-grained entity typing},
+  author={Ding, Ning and Chen, Yulin and Han, Xu and Xu, Guangwei and Xie, Pengjun and Zheng, Hai-Tao and Liu, Zhiyuan and Li, Juanzi and Kim, Hong-Gee},
+  journal={arXiv preprint arXiv:2108.10604},
+  year={2021}
+}
+
+```
+
