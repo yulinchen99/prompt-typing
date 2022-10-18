@@ -1,22 +1,17 @@
-data='openentity'
+data='fewnerd' # "ontonotes", "openentity", "bbn"
 echo $data
-# highlight_entity='<ENTITY>-</ENTITY>'
-# soft-prompt
-prompt='soft1'
-# hard-prompt
-#prompt='hard1'
+
+# use soft-prompt
+prompt='soft'
+# use hard-prompt
+# prompt='hard3'
 
 # baseline BERT-CLS
-# python -u train.py --model baseline --model_name bert-base-cased --data $data --lr 5e-5 --usecls
+python -u train.py --model baseline --model_name bert-base-cased --data $data --lr 2e-5 --usecls --epoch 500 --batch_size 32 --val_batch_size 64 --val_step 2000 --log_step 1000
 
-# baseline 1 shot train data
-# python -u train.py --model baseline --model_name bert-base-cased --data $data --highlight_entity $highlight_entity --lr 5e-5 --sample_num 1 --usecls
-python -u train.py --model baseline --model_name bert-base-cased --data $data --lr 5e-5 --usecls --epoch 20 --val_step 2000
+# prompt typing 
+# 1 shot
+python -u train.py --model maskedlm --model_name bert-base-cased --data $data --prompt $prompt  --lr 5e-5 --sample_num 1
 
-
-# # prompt model
-# python -u train.py --model maskedlm --model_name bert-base-cased --data $data --prompt $prompt  --lr 5e-5
-
-# # 1 shot train data
-# python -u train.py --model maskedlm --model_name bert-base-cased --data $data --prompt $prompt  --lr 5e-5 --sample_num 1
-
+# 8 shot
+python -u train.py --model maskedlm --model_name bert-base-cased --data $data --prompt $prompt  --lr 5e-5 --sample_num 1

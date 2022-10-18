@@ -72,6 +72,8 @@ def get_openentity_metrics(label, pred, idx2tag=None, string=False):
     if not string:
         label = [[idx2tag[l] for l in la] for la in label]
         pred = [[idx2tag[p] for p in pr] for pr in pred]
+    # print(label)
+    # print(pred)
     acc = strict(label, pred)
     macro = loose_macro(label, pred)
     micro = loose_micro(label, pred)
@@ -105,4 +107,6 @@ def get_openentity_metrics_for_prompt(y_true, y_pred, idx2tag, idx2oritag, orita
         merged_pr_tag = list(set(merged_pr_tag).intersection(set(ori_tag_list)))
         merged_pr_tags.append(merged_pr_tag)
     label = [[idx2tag[l] for l in la] for la in y_true]
+    print("predicted:", merged_pr_tags[:10])
+    print("label:", label[:10])
     return get_openentity_metrics(label, merged_pr_tags, string=True)

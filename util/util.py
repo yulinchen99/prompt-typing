@@ -112,16 +112,17 @@ class PartialLabelLoss(nn.Module):
 sigmoid_fn = nn.Sigmoid()
 
 class MultiLabelLoss(nn.Module):
-    def __init__(self):
+    def __init__(self, model_type="baseline"):
         nn.Module.__init__(self)
         self.loss = nn.BCEWithLogitsLoss()
+        self.model_type = model_type
     
-    def forward(self, score, label, model_type="baseline"):
+    def forward(self, score, label):
         binary_label = torch.zeros(score.size()).to(score.device)
         for i, la in enumerate(label):
             if len(la):
                 binary_label[i][la] = 1.0
-        if model_type == "maskedlm": # use simple BCE loss for maskedlm
+        if self.model_type == "maskedlm": # use simple BCE loss for maskedlm
             return self.loss(score, binary_label)
         else:
             return self.multilabel_bin_loss(score, binary_label, model_type)
@@ -199,6 +200,7 @@ def get_output_index(outputs):
     outputs = sigmoid_fn(outputs).data.cpu().clone()
     for single_dist in outputs:
         single_dist = single_dist.numpy()
+        # print(single_dist)
         pred_id = np.where(single_dist > 0.5)[0].tolist()
         # if not pred_id:
         #     arg_max_ind = np.argmax(single_dist)

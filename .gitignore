@@ -103,6 +103,7 @@ venv.bak/
 # mypy
 .mypy_cache/
 checkpoint/
+output/
 .vscode/
 result/
 *.out
@@ -110,10 +111,19 @@ result/
 test-result/
 *.log
 *.slurm
-*.json
+# *.json
 *.csv
-*.txt
+# *.txt
 *.zip
 distant-pretraining/data
 !distant-pretraining/data/*.sh
 !distant-pretraining/data/train_data_gen.py
+!openprompt_util/script
+ernie_data/
+data/*
+!data/openentity/
+!data/openentity-general/
+!data/*.sh
+**_ignore**
+analysis/
+**.txt

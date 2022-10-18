@@ -180,7 +180,7 @@ def main():
     elif args.loss == 'partial':
         Loss = PartialLabelLoss()
     elif args.loss == "multi_label":
-        Loss = MultiLabelLoss()
+        Loss = MultiLabelLoss(model_type = args.model)
     else:
         assert False, print(f'invalid loss {args.loss}!')
 
@@ -240,7 +240,7 @@ def main():
                 # print(data)
                 to_cuda(data)
                 tag_score = model(data)
-                loss = Loss(tag_score, data['labels'], model_type = args.model)
+                loss = Loss(tag_score, data['labels'])
                 loss.backward()
 
                 if args.loss == "multi_label":
