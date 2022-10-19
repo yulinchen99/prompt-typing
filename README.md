@@ -1,6 +1,13 @@
 # Prompt Typing
 Code and data for EMNLP 2022 Findings paper **Prompt-Learning for Fine-Grained Entity Typing**. This repository contains code for experiments on BBN, Few-NERD, OntoNotes and OpenEntity with BERT-base-cased. And the methodology is also be found in the [OpenPrompt](https://github.com/thunlp/OpenPrompt/blob/main/experiments/typing_ptyping.yaml) repository.
 
+<img width="900" alt="image" src="https://user-images.githubusercontent.com/17723822/196573669-d61e05f8-7266-4285-8245-c7ddba5131ee.png">
+
+
+<img width="900" alt="image" src="https://user-images.githubusercontent.com/17723822/196573693-8438ca6e-1e67-4aba-a72b-ebefefe86d40.png">
+
+
+
 ## Project Structure
 ```
 .
@@ -45,7 +52,7 @@ python -u train.py \
 
 ### Run with multiple settings
 - Run 1-shot 
-```
+```bash
 python -u train.py --model maskedlm --model_name bert-base-cased --data fewnerd --prompt hard  --lr 5e-5 --sample_num 1
 ```
 
