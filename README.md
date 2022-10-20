@@ -38,7 +38,7 @@ Code and data for EMNLP 2022 Findings paper **Prompt-Learning for Fine-Grained E
 
 ## How to Run
 ### Explanation of main command arguments
-```
+```bash
 python -u train.py \
 --model maskedlm \ # training mode, "baseline" for vanilla FT, "maskedlm" for prompt typing
 --model_name bert-base-cased \ # pretrained model path
@@ -56,20 +56,20 @@ python -u train.py --model maskedlm --model_name bert-base-cased --data fewnerd 
 ```
 
 - Run full-supervised setting
-```
+```bash
 python -u train.py --model maskedlm --model_name bert-base-cased --data fewnerd --prompt hard  --lr 5e-5
 ```
 
 
 - Run zero-shot setting
     - Download semi-supervised pretrained model checkpoint
-    ```
+    ```bash
     cd distant-pretraining/result
     bash download.sh
     cd ../../
     ```
     - Run the test
-    ```
+    ```bash
     python -u train.py --model maskedlm --model_name bert-base-cased --data fewnerd --prompt hard  --lr 5e-5 --test_only --load_ckpt distant-pretraining/result/best-checkpoint/5000
     ```
 
@@ -81,7 +81,7 @@ Specify `--prompt` arguments to denote which template to be used. Below is a lis
 - `soft`: `<text> [P] <entity> [P1] [P2] <mask>`
 - `soft1`: `<text> [P] <entity> [P1] [P2] [P3] <mask>`
 - `soft2`: `<text> [P] <entity> [P1] [P2] [P3] [P4] <mask>`
-- `soft3`: `<text> [P] <entity> [P1] [P2] [P3] [P4] <mask>`
+- `soft3`: `<text> [P] <entity> [P1] [P2] [P3] [P4] [P5] <mask>`
 
 ### Citation
 
