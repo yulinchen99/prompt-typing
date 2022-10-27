@@ -7,7 +7,7 @@ prompt='soft'
 # prompt='hard3'
 
 # baseline BERT-CLS Finetuning
-python -u train.py --model baseline --model_name bert-base-cased --data $data --lr 2e-5 --usecls --epoch 500 --batch_size 32 --val_batch_size 64 --val_step 2000 --log_step 1000
+python -u train.py --model baseline --model_name bert-base-cased --data $data --lr 2e-5 --usecls --epoch 10 --batch_size 32 --val_batch_size 64 --val_step 2000 --log_step 1000
 
 # prompt typing 
 # 1 shot

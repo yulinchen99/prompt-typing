@@ -151,19 +151,20 @@ def main():
 
     # initialize dataloader
     print(f'initializing data from {args.data}...')
-    if "openentity" in args.data:
-        if args.model == "baseline":
-            train_dataset = DATA_CLASS.get(data_name, DATA_CLASS["default"])[0](args.data, 'train', args.max_length, oritag2idx, highlight_entity=HIGHLIGHT_ENTITY, sample_num=args.sample_num)
-            val_dataset = DATA_CLASS.get(data_name, DATA_CLASS["default"])[0](args.data, 'dev', args.max_length, oritag2idx, highlight_entity=HIGHLIGHT_ENTITY)
-            test_dataset = DATA_CLASS.get(data_name, DATA_CLASS["default"])[0](args.data, 'test', args.max_length, oritag2idx, highlight_entity=HIGHLIGHT_ENTITY)
-        else:
-            train_dataset = DATA_CLASS.get(data_name, DATA_CLASS["default"])[1](args.data, 'train', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY, sample_num=args.sample_num)
-            val_dataset = DATA_CLASS.get(data_name, DATA_CLASS["default"])[1](args.data, 'dev', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
-            test_dataset = DATA_CLASS.get(data_name, DATA_CLASS["default"])[1](args.data, 'test', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
+    # if "openentity" in args.data:
+    if args.model == "baseline":
+        train_dataset = DATA_CLASS.get(data_name, DATA_CLASS["default"])[0](args.data, 'train', args.max_length, oritag2idx, highlight_entity=HIGHLIGHT_ENTITY, sample_num=args.sample_num)
+        val_dataset = DATA_CLASS.get(data_name, DATA_CLASS["default"])[0](args.data, 'dev', args.max_length, oritag2idx, highlight_entity=HIGHLIGHT_ENTITY)
+        test_dataset = DATA_CLASS.get(data_name, DATA_CLASS["default"])[0](args.data, 'test', args.max_length, oritag2idx, highlight_entity=HIGHLIGHT_ENTITY)
     else:
-        train_dataset = EntityTypingDataset(args.data, 'train', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY, sample_num=args.sample_num)
-        val_dataset = EntityTypingDataset(args.data, 'dev', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
-        test_dataset = EntityTypingDataset(args.data, 'test', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
+        train_dataset = DATA_CLASS.get(data_name, DATA_CLASS["default"])[1](args.data, 'train', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY, sample_num=args.sample_num)
+        val_dataset = DATA_CLASS.get(data_name, DATA_CLASS["default"])[1](args.data, 'dev', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
+        test_dataset = DATA_CLASS.get(data_name, DATA_CLASS["default"])[1](args.data, 'test', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
+
+    # else:
+    #     train_dataset = EntityTypingDataset(args.data, 'train', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY, sample_num=args.sample_num)
+    #     val_dataset = EntityTypingDataset(args.data, 'dev', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
+    #     test_dataset = EntityTypingDataset(args.data, 'test', args.max_length, tag2idx, tag_mapping, highlight_entity=HIGHLIGHT_ENTITY)
 
     print(train_dataset[0])
 
@@ -400,8 +401,12 @@ def main():
         if 'ontonote' in args.data:
             y_true = torch.LongTensor(y_true)
             y_pred = torch.LongTensor(y_pred)
-            y_pred = y_pred[y_true != tag2idx['other']]
-            y_true = y_true[y_true != tag2idx['other']]
+            if args.model == "maskedlm":
+                y_pred = y_pred[y_true != tag2idx['other']]
+                y_true = y_true[y_true != tag2idx['other']]
+            else:
+                y_pred = y_pred[y_true != oritag2idx['/other']]
+                y_true = y_true[y_true != oritag2idx['/other']]
             y_true = y_true.numpy().tolist()
             y_pred = y_pred.numpy().tolist()
         # print(y_true[:100])
